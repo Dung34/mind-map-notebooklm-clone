@@ -361,6 +361,7 @@ Phase 9 mở rộng pipeline hiện tại (stage 1-5) bằng các bước sau đ
 **Input:**
 - `cleaned/*.json` của run hiện tại
 - snapshot metadata của run trước (url, content_hash)
+- cleaned cache của run trước (để skip scrape nếu bật tối ưu)
 
 **Output:**
 - `delta.json` gồm:
@@ -391,6 +392,19 @@ Chỉ re-chunk cho `new_urls + changed_urls`:
 - URL thay đổi: regenerate chunk, đánh dấu chunk cũ là superseded.
 
 Kết quả: `chunks_delta.jsonl`.
+
+### Stage 7b – Scrape optimization (A5)
+
+Mặc định (`FIRECRAWL_SKIP_SCRAPE_FOR_KNOWN_URLS=true`):
+
+- URL đã có trong `page_index_latest.json` sẽ **không gọi scrape**.
+- Pipeline dùng `cleaned` cache của run trước cho các URL này.
+- Chỉ scrape URL mới (hoặc URL known nhưng thiếu cache local).
+
+Stats quan trọng:
+- `scrape_target_count`: số URL mục tiêu từ map + limit.
+- `scrape_selected_count`: số URL thực sự gọi scrape.
+- `scrape_skipped_count`: số URL được skip scrape nhờ cache.
 
 ### Stage 8 – Embedding + Vector upsert
 

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     FIRECRAWL_SCRAPE_CONCURRENCY: int = Field(default=5, ge=1, le=20)
     FIRECRAWL_SCRAPE_WAIT_MS: int = Field(default=1500, ge=0, le=60000)
     FIRECRAWL_SCRAPE_ONLY_MAIN: bool = True
+    FIRECRAWL_SKIP_SCRAPE_FOR_KNOWN_URLS: bool = True
 
     OUTPUT_DIR: str = "./out"
     LOG_LEVEL: str = "INFO"

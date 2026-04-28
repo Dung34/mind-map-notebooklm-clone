@@ -275,7 +275,7 @@ Phase 9 tập trung đưa demo hiện tại thành service ingest dùng được
 ### 9.2 Phạm vi triển khai đề xuất
 
 - **Infra setup (đã chốt)**: PostgreSQL 16 (metadata/jobs + pgvector), Redis 7.x (queue/cache), deploy Docker Compose trên VM.
-- **Caching & dedupe**: cache theo `normalized_url + content_hash` để bỏ qua page không đổi.
+- **Caching & dedupe**: cache theo `normalized_url + content_hash`; hỗ trợ skip scrape cho URL đã biết bằng `FIRECRAWL_SKIP_SCRAPE_FOR_KNOWN_URLS=true`.
 - **Embedding layer (đã chốt)**: OpenAI `text-embedding-3-small`, upsert vào `pgvector`.
 - **Ingest API**: `POST /ingest`, `GET /jobs/{id}`, `POST /ingest/dry-run`.
 - **Quality controls**: bỏ chunk quá nhiễu/nav; thêm score chất lượng chunk.
@@ -308,6 +308,7 @@ Phase 9 tập trung đưa demo hiện tại thành service ingest dùng được
 - Chunk size cho RAG: `CHUNK_MAX_WORDS=220`, `CHUNK_MIN_WORDS=50`, `CHUNK_OVERLAP_SENTENCES=2`.
 - Worker concurrency: `2`.
 - Remove policy: inactive + `TTL=7 ngày` trước khi expire.
+- Scrape optimization: `FIRECRAWL_SKIP_SCRAPE_FOR_KNOWN_URLS=true`.
 
 ### 9.7 Chạy hạ tầng local (Docker Compose)
 
@@ -337,6 +338,19 @@ docker compose down -v
 Sau khi chạy compose, có thể dùng ngay giá trị trong `.env.example`:
 - `DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/cleaner_raw_data`
 - `REDIS_URL=redis://localhost:6379/0`
+
+### 9.8 Lưu ý quan trọng về DB schema
+
+Docker Compose chỉ khởi tạo hạ tầng (Postgres/Redis). Để có bảng metadata cho Phase 9, cần thêm bước migration:
+
+- Setup Alembic
+- Tạo migration baseline
+- Chạy `alembic upgrade head`
+
+Các bảng tối thiểu cần có:
+- `ingest_runs`
+- `page_index`
+- `chunk_index`
 
 Chi tiết kiến trúc và pipeline cho Phase 9:
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (mục Phase 9 Architecture)

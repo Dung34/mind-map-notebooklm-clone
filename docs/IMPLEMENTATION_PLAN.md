@@ -261,6 +261,7 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
   - `page_index` (`normalized_url`, `content_hash`, `last_run_id`)
   - `chunk_index` (`chunk_id`, `source_url`, `run_id`, `is_active`)
 - Healthcheck kết nối DB/Redis/Vector DB trước khi chạy pipeline.
+- Thiết lập migration tool (`Alembic`) và migration baseline cho 3 bảng metadata.
 
 ### Bước 9.1: Incremental ingest (delta)
 
@@ -317,11 +318,17 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 
 **Sprint A (Tuần 1) – Incremental chạy được**
 
-- A1. Setup infra local (PostgreSQL16 + pgvector, Redis7) + env + healthcheck.
-- A2. Hash + snapshot index.
-- A3. Delta detection + `delta.json`.
-- A4. Selective chunking (`chunks_delta.jsonl`) + manifest.
-- A5. Smoke test domain thật (lần 2 giảm URL xử lý).
+- [x] A1a. Setup infra local (PostgreSQL16 + pgvector, Redis7) + env + healthcheck.
+- [x] A1b. Setup Alembic + migration baseline (`ingest_runs`, `page_index`, `chunk_index`).
+- [x] A2. Hash + snapshot index (`page_index_latest.json`, `page_index_snapshot_<run_id>.json`).
+- [x] A3. Delta detection + `delta.json`.
+- [x] A4. Selective chunking (`chunks_delta.jsonl`) + manifest.
+- [x] A5. Smoke test domain thật (lần 2 giảm URL xử lý).
+
+**Definition of done cho A1**
+- [x] `docker compose up -d` và services báo `healthy`.
+- [x] Chạy `alembic upgrade head` thành công trên Postgres local.
+- [x] Verify có đủ 3 bảng metadata trong DB.
 
 **Sprint B (Tuần 2) – Vector + API ingest**
 

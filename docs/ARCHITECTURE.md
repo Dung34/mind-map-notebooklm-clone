@@ -286,12 +286,16 @@ Baseline stack đã chốt:
 - Embedding model: OpenAI `text-embedding-3-small`.
 - Worker concurrency: `2` (ưu tiên ổn định và chi phí).
 
+Lưu ý triển khai:
+- Docker Compose chỉ dựng hạ tầng.
+- Schema metadata phải được quản lý bằng migration (Alembic), không tạo thủ công trên môi trường chạy thật.
+
 ### 9.2 Data contracts mới
 
 - `**manifest.json`**
   - `run_id`, `pipeline_version`, `input`, `started_at`, `finished_at`, `stats`.
 - `**delta.json**`
-  - `new_urls`, `changed_urls`, `unchanged_urls`, `dropped_urls`.
+  - `new_urls`, `changed_urls`, `unchanged_urls`, `removed_urls`.
 - `**embeddings.jsonl**`
   - `chunk_id`, `embedding_model`, `dim`, `vector_checksum`, `upsert_status`.
 
@@ -299,8 +303,9 @@ Baseline stack đã chốt:
 
 1. Tính `content_hash` trên cleaned text (hoặc markdown nếu muốn nhạy hơn).
 2. So sánh với snapshot lần chạy gần nhất theo `normalized_url`.
-3. Chỉ chunk + embed cho trang mới hoặc thay đổi.
-4. Upsert vector theo `chunk_id`; xóa/disable vector cũ nếu URL bị remove.
+3. Nếu bật `FIRECRAWL_SKIP_SCRAPE_FOR_KNOWN_URLS`, skip scrape cho URL đã có snapshot + cache.
+4. Chỉ chunk + embed cho trang mới hoặc thay đổi.
+5. Upsert vector theo `chunk_id`; xóa/disable vector cũ nếu URL bị remove.
 
 Chính sách lifecycle đã chốt:
 
