@@ -332,11 +332,11 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 
 **Sprint B (Tuần 2) – Vector + API ingest**
 
-- B1. Embedding service (batch + retry).
-- B2. Vector repository (upsert/delete by `chunk_id`).
-- B3. API ingest/job status/dry-run.
-- B4. Metrics + guardrails + cost summary.
-- B5. Hardening + docs/runbook.
+- [x] B1. Embedding service (batch + retry).
+- [x] B2. Vector repository (upsert/delete by `chunk_id`).
+- [x] B3. API ingest/job status/dry-run.
+- [x] B4. Metrics + guardrails + cost summary.
+- [x] B5. Hardening + docs/runbook.
 
 ---
 

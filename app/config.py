@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,6 +34,17 @@ class Settings(BaseSettings):
     CHUNK_MAX_WORDS: int = Field(default=400, ge=50, le=2000)
     CHUNK_MIN_WORDS: int = Field(default=15, ge=1, le=200)
     CHUNK_OVERLAP_SENTENCES: int = Field(default=2, ge=0, le=10)
+
+    OPENAI_API_KEY: Optional[str] = None
+    EMBEDDING_MODEL: str = "text-embedding-3-small"
+    EMBEDDING_BATCH_SIZE: int = Field(default=32, ge=1, le=256)
+    EMBEDDING_MAX_RETRIES: int = Field(default=4, ge=0, le=10)
+    DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/cleaner_raw_data"
+    VECTOR_TABLE: str = "rag_chunks"
+    MAX_SCRAPE_URLS_PER_RUN: int = Field(default=50, ge=1, le=10000)
+    MAX_EMBEDDING_TOKENS_PER_RUN: int = Field(default=500000, ge=1000, le=100000000)
+    SCRAPE_EST_COST_PER_URL_USD: float = Field(default=0.01, ge=0.0, le=10.0)
+    EMBED_EST_COST_PER_1K_TOKENS_USD: float = Field(default=0.00002, ge=0.0, le=1.0)
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

@@ -416,6 +416,18 @@ Stats quan trọng:
 3. Upsert vector DB với key `chunk_id`.
 4. Ghi `embeddings.jsonl` + lỗi theo từng batch.
 
+**B1 implementation notes:**
+- Service: `app/embed/openai_embedding_service.py`.
+- Batch size từ env: `EMBEDDING_BATCH_SIZE` (default `32`).
+- Retry policy dùng exponential backoff, retry cho timeout/connect và HTTP `429/5xx`.
+- Smoke script: `examples/check_phase9_b1.py` (ghi `out/<slug>/embeddings.jsonl`).
+
+**B2 implementation notes:**
+- Repository: `app/vector/pgvector_repository.py`.
+- Upsert idempotent theo `chunk_id` (Postgres `ON CONFLICT (chunk_id)`).
+- Delete theo danh sách `chunk_id` (`DELETE ... WHERE chunk_id = ANY(...)`).
+- Smoke script: `examples/check_phase9_b2.py`.
+
 **Baseline đã chốt (Phase 9):**
 - Embedding provider: OpenAI
 - Embedding model: `text-embedding-3-small`
@@ -459,6 +471,15 @@ Sinh `manifest.json` để truy vết lần chạy:
 - Thiết lập `max_urls_per_run` và `max_embedding_tokens_per_run`.
 - Alert khi `changed_urls` tăng đột biến hoặc tỷ lệ chunk lỗi vượt ngưỡng.
 - URL bị remove: chuyển inactive, expire sau `TTL=7 ngày`.
+
+### B3 API surface
+
+- `POST /ingest`: trigger full ingest async (pipeline + embed + vector upsert).
+- `GET /jobs/{run_id}`: theo dõi trạng thái ingest job.
+- `POST /ingest` với `dry_run=true`: chỉ trả estimate, không chạy scrape/embed.
+- `POST /ingest/reindex`: chạy lại embed + vector upsert từ cache chunks.
+- Job response có thêm stage durations và `cost_summary`.
+- Error contracts: `validation_error`, `quota_exceeded`, `job_not_found`.
 
 ### Chunk profile cho RAG (đã chốt)
 

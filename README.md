@@ -254,10 +254,36 @@ Mỗi dòng trong `chunks.jsonl`:
 
 ## 8. Tài liệu chi tiết
 
+- **Đọc một luồng duy nhất (khuyến nghị):** [`docs/RUNBOOK.md`](docs/RUNBOOK.md)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) – Kiến trúc, data model, quyết định thiết kế.
 - [`docs/PIPELINE.md`](docs/PIPELINE.md) – Chi tiết từng bước, ví dụ request/response, các tham số tinh chỉnh.
 - [`docs/API_KEYS.md`](docs/API_KEYS.md) – Lấy và cấu hình API keys cho Perplexity, FireCrawl.
 - [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) – Kế hoạch triển khai từng phase.
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) – One-flow runbook (API, DB, artifacts, rollback).
+
+---
+
+## 8.1 Ingest API (B3)
+
+Khởi chạy API:
+
+```powershell
+uvicorn app.main:app --reload
+```
+
+Endpoints:
+
+- `POST /ingest` - chạy full ingest async (pipeline + embed + vector upsert + cập nhật `ingest_runs` DB), trả `run_id`.
+- `GET /jobs/{run_id}` - lấy trạng thái job (`queued/running/success/failed`).
+- `POST /ingest` với `dry_run=true` - estimate số URL sẽ scrape.
+- `POST /ingest/reindex` - re-embed + upsert từ cleaned/chunk cache hiện có.
+
+Guardrails + cost summary:
+
+- `MAX_SCRAPE_URLS_PER_RUN`
+- `MAX_EMBEDDING_TOKENS_PER_RUN`
+- Dry-run và kết quả job trả `cost_summary` (`scrape_est_usd`, `embed_est_usd`, `total_est_usd`).
+- Error contract chuẩn hóa: `validation_error`, `quota_exceeded`, `job_not_found`.
 
 ---
 
@@ -287,6 +313,12 @@ Phase 9 tập trung đưa demo hiện tại thành service ingest dùng được
 - `out/<slug>/delta.json` (URL mới, URL thay đổi, URL bỏ qua).
 - `out/<slug>/embeddings.jsonl` (chunk_id, vector_dim, model, checksum).
 - API docs cho ingest flow + retry policy + rate-limit.
+
+Kiểm tra nhanh B1 (embedding batch + retry):
+
+```powershell
+python examples/check_phase9_b1.py --website "fptsoftware.com" --limit 10
+```
 
 ### 9.4 Tiêu chí Done (Phase 9)
 
