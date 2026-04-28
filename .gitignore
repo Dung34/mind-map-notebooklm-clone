@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Local env / secrets
+.env
+.env.local
+
+# Pipeline output
+out/
+*.jsonl
+
+# IDE
+.idea/
+.vscode/
+
+# Test artifacts
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage

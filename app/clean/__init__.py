@@ -1,0 +1,2 @@
+"""Markdown cleaner stage."""
+
