@@ -50,6 +50,8 @@ flowchart TB
     S5 --> DB
 ```
 
+
+
 ---
 
 ## 2. Data model giữa các bước
@@ -132,6 +134,7 @@ async def run_pipeline(
 ```
 
 Triển khai ở mức demo:
+
 - Stage 1 dùng Perplexity Search API qua SDK (`client.search.create()`), Stage 2-3 dùng FireCrawl SDK.
 - Stage 4, 5 chạy CPU-bound → có thể đẩy vào `asyncio.to_thread` hoặc process pool nếu volume lớn.
 - Mỗi stage đều **idempotent + cache-able** theo input hash.
@@ -142,11 +145,13 @@ Triển khai ở mức demo:
 
 ### 4.1 Vì sao dùng Perplexity Search API ở bước 1?
 
-| Phương án                  | Ưu điểm                                  | Nhược điểm |
-|---------------------------|------------------------------------------|------------|
-| Seed URL thủ công         | Đơn giản, minh bạch                      | Coverage thấp nếu chỉ có ít URL đầu vào |
-| Search API thường         | Kết quả thuần, dễ kiểm soát              | Cần tự lọc nhiều URL nhiễu |
-| **Perplexity Search API** | Tập trung cho web search, trả URL nhanh để bootstrap seed | Vẫn cần lọc domain và verify URL |
+
+| Phương án                 | Ưu điểm                                                   | Nhược điểm                              |
+| ------------------------- | --------------------------------------------------------- | --------------------------------------- |
+| Seed URL thủ công         | Đơn giản, minh bạch                                       | Coverage thấp nếu chỉ có ít URL đầu vào |
+| Search API thường         | Kết quả thuần, dễ kiểm soát                               | Cần tự lọc nhiều URL nhiễu              |
+| **Perplexity Search API** | Tập trung cho web search, trả URL nhanh để bootstrap seed | Vẫn cần lọc domain và verify URL        |
+
 
 Chọn Perplexity Search API để bootstrap seed URLs nhanh khi đầu vào chỉ có tên công ty hoặc website chưa đầy đủ.
 
@@ -168,29 +173,32 @@ Chọn Perplexity Search API để bootstrap seed URLs nhanh khi đầu vào ch�
 
 Thứ tự xử lý:
 
-1. **`strip_markdown`**:
-   - Xoá HTML tags, image markdown, linked-image, bare URL.
-   - Unwrap hyperlink (`[text](url)` -> `text`).
-   - Bỏ markdown markers (`#`, `>`, backticks, code blocks).
-   - Normalize whitespace.
-2. **`filter_blocks`**:
-   - Tách block theo `\n\n`.
-   - Loại nav blocks bằng heuristic (`>=60%` dòng ngắn).
-   - Loại line match boilerplate regex (EN + VI).
-3. **`dedup_blocks`**:
-   - Dedupe paragraph theo key chuẩn hoá (`lowercase + collapse spaces`).
+1. `**strip_markdown`**:
+  - Xoá HTML tags, image markdown, linked-image, bare URL.
+  - Unwrap hyperlink (`[text](url)` -> `text`).
+  - Bỏ markdown markers (`#`, `>`, backticks, code blocks).
+  - Normalize whitespace.
+2. `**filter_blocks**`:
+  - Tách block theo `\n\n`.
+  - Loại nav blocks bằng heuristic (`>=60%` dòng ngắn).
+  - Loại line match boilerplate regex (EN + VI).
+3. `**dedup_blocks**`:
+  - Dedupe paragraph theo key chuẩn hoá (`lowercase + collapse spaces`).
 
 ### 4.5 Vì sao dùng Rule-based Chunking (heading + sentence overlap)?
 
-| Cách                                      | Ưu | Nhược |
-|-------------------------------------------|----|-------|
-| Fixed-size (500 words/tokens)             | Đơn giản, nhanh | Cắt giữa câu, mất ngữ cảnh |
+
+| Cách                                        | Ưu                                           | Nhược                              |
+| ------------------------------------------- | -------------------------------------------- | ---------------------------------- |
+| Fixed-size (500 words/tokens)               | Đơn giản, nhanh                              | Cắt giữa câu, mất ngữ cảnh         |
 | **Rule-based (heading + sentence overlap)** | Bám cấu trúc web tốt, chi phí thấp, dễ debug | Heading heuristic có thể nhận nhầm |
-| Semantic (embedding-based)                | Cắt theo chuyển ý tốt hơn | Tốn chi phí và độ phức tạp |
+| Semantic (embedding-based)                  | Cắt theo chuyển ý tốt hơn                    | Tốn chi phí và độ phức tạp         |
+
 
 Chọn Rule-based làm mặc định cho MVP để pipeline chạy ổn định, rẻ và dễ debug.
 
 Luật cắt hiện tại:
+
 - Detect section heading theo heuristic (2-15 từ, viết hoa đầu dòng, không kết thúc dấu câu).
 - Tách body thành câu bằng regex đơn giản.
 - Tích luỹ đến `CHUNK_MAX_WORDS=400` thì tạo chunk.
@@ -201,14 +209,16 @@ Luật cắt hiện tại:
 
 ## 5. Error handling & retry
 
-| Stage          | Loại lỗi              | Xử lý                                             |
-|----------------|----------------------|---------------------------------------------------|
-| Perplexity     | 429 / 5xx            | Retry exponential backoff (3 lần, base 2s).         |
-| Seed URL input | URL không hợp lệ      | Normalize + validate bằng `HttpUrl`, reject sớm.    |
-| FireCrawl map  | Empty result          | Fallback: dùng trực tiếp các seed URL hợp lệ.      |
-| FireCrawl scrape | Timeout / 4xx       | Skip URL, ghi log, tiếp tục các URL khác.         |
-| Clean markdown | Trang quá ngắn (<50 từ) | Đánh dấu `quality=low`, skip khỏi chunking.    |
-| Chunking       | Heading detect hoặc sentence split lệch | Merge chunk ngắn + fallback split theo word count. |
+
+| Stage            | Loại lỗi                                | Xử lý                                              |
+| ---------------- | --------------------------------------- | -------------------------------------------------- |
+| Perplexity       | 429 / 5xx                               | Retry exponential backoff (3 lần, base 2s).        |
+| Seed URL input   | URL không hợp lệ                        | Normalize + validate bằng `HttpUrl`, reject sớm.   |
+| FireCrawl map    | Empty result                            | Fallback: dùng trực tiếp các seed URL hợp lệ.      |
+| FireCrawl scrape | Timeout / 4xx                           | Skip URL, ghi log, tiếp tục các URL khác.          |
+| Clean markdown   | Trang quá ngắn (<50 từ)                 | Đánh dấu `quality=low`, skip khỏi chunking.        |
+| Chunking         | Heading detect hoặc sentence split lệch | Merge chunk ngắn + fallback split theo word count. |
+
 
 ---
 
@@ -241,3 +251,82 @@ Luật cắt hiện tại:
 - **Unit test** cho mỗi stage với SDK mocks (mock Perplexity/FireCrawl client methods).
 - **Golden test** cho `clean_markdown`: nhập markdown mẫu → so sánh output với file `.expected.txt`.
 - **Integration test** end-to-end với 1 domain nhỏ + record cassette (`vcrpy`).
+
+---
+
+## 9. Phase 9 Architecture (sau demo)
+
+Mục tiêu phase này: chuyển từ pipeline demo sang ingest service cho RAG production với incremental update + vector indexing.
+
+### 9.1 Logical components
+
+```mermaid
+flowchart LR
+    A[Ingest API] --> B[Pipeline Orchestrator]
+    B --> C[Raw/Clean Cache Store]
+    B --> D[Chunk Builder]
+    D --> E[Embedding Worker]
+    E --> F[(Vector DB)]
+    B --> G[(Artifacts + Manifest)]
+    B --> H[Metrics/Logs]
+```
+
+
+
+- **Ingest API**: nhận request ingest, validate input, cấp `run_id`.
+- **Pipeline Orchestrator**: dùng lại stage 1-5 hiện tại, thêm logic incremental.
+- **Cache Store**: lưu `url`, `content_hash`, `last_crawled_at`, `status`.
+- **Embedding Worker**: đọc chunk delta, tạo embedding theo batch.
+- **Vector DB**: upsert theo `chunk_id`, hỗ trợ metadata filter.
+
+Baseline stack đã chốt:
+
+- PostgreSQL `16` + `pgvector` (metadata + vectors cùng một DB).
+- Redis `7.x` (queue + cache).
+- Embedding model: OpenAI `text-embedding-3-small`.
+- Worker concurrency: `2` (ưu tiên ổn định và chi phí).
+
+### 9.2 Data contracts mới
+
+- `**manifest.json`**
+  - `run_id`, `pipeline_version`, `input`, `started_at`, `finished_at`, `stats`.
+- `**delta.json**`
+  - `new_urls`, `changed_urls`, `unchanged_urls`, `dropped_urls`.
+- `**embeddings.jsonl**`
+  - `chunk_id`, `embedding_model`, `dim`, `vector_checksum`, `upsert_status`.
+
+### 9.3 Incremental strategy
+
+1. Tính `content_hash` trên cleaned text (hoặc markdown nếu muốn nhạy hơn).
+2. So sánh với snapshot lần chạy gần nhất theo `normalized_url`.
+3. Chỉ chunk + embed cho trang mới hoặc thay đổi.
+4. Upsert vector theo `chunk_id`; xóa/disable vector cũ nếu URL bị remove.
+
+Chính sách lifecycle đã chốt:
+
+- URL remove khỏi source: đánh dấu inactive, không xóa ngay.
+- TTL expire: `7 ngày`, hết TTL mới hard delete vector/record.
+
+### 9.4 API boundary đề xuất
+
+- `POST /ingest`
+  - body: `company`, `website`, `manual_seeds`, `limit`, `dry_run`.
+  - response: `run_id`, `status_url`.
+- `GET /jobs/{run_id}`
+  - trả `status`, `stage`, `progress`, `stats`, `errors`.
+- `POST /ingest/reindex`
+  - chạy lại chunk+embedding từ cleaned cache, không scrape lại.
+
+### 9.5 Non-functional requirements
+
+- **Idempotency**: request có cùng `run_key` không tạo job trùng.
+- **Backpressure**: queue giới hạn số job chạy song song theo quota.
+- **Retry policy**: retry có phân loại theo lỗi transient/permanent.
+- **Cost guardrails**: hard limit số URL scrape / run + token budget cho embedding.
+
+Thông số RAG baseline:
+
+- `CHUNK_MAX_WORDS=220`
+- `CHUNK_MIN_WORDS=50`
+- `CHUNK_OVERLAP_SENTENCES=2`
+

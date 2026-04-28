@@ -348,3 +348,107 @@ out/fpt-software/
 - Embedding pipeline → vector DB.
 - Hoặc dùng làm input cho fine-tuning / evaluation.
 
+---
+
+## Phase 9 – Incremental Ingest + Embedding Pipeline
+
+Phase 9 mở rộng pipeline hiện tại (stage 1-5) bằng các bước sau để phục vụ vận hành RAG thực tế.
+
+### Stage 6 – Delta detection (theo URL + hash)
+
+**Mục tiêu:** xác định trang mới/thay đổi để tránh re-process toàn bộ.
+
+**Input:**
+- `cleaned/*.json` của run hiện tại
+- snapshot metadata của run trước (url, content_hash)
+
+**Output:**
+- `delta.json` gồm:
+  - `new_urls`
+  - `changed_urls`
+  - `unchanged_urls`
+  - `removed_urls` (tuỳ chính sách)
+
+**Pseudo-flow:**
+
+```python
+for page in cleaned_pages:
+    h = sha256(normalize_text(page.text))
+    prev = previous_index.get(page.url)
+    if not prev:
+        new_urls.append(page.url)
+    elif prev.content_hash != h:
+        changed_urls.append(page.url)
+    else:
+        unchanged_urls.append(page.url)
+```
+
+### Stage 7 – Re-chunk selective
+
+Chỉ re-chunk cho `new_urls + changed_urls`:
+
+- URL không đổi: giữ chunk cũ.
+- URL thay đổi: regenerate chunk, đánh dấu chunk cũ là superseded.
+
+Kết quả: `chunks_delta.jsonl`.
+
+### Stage 8 – Embedding + Vector upsert
+
+**Input:** `chunks_delta.jsonl`.
+
+**Process:**
+1. Batch chunk theo kích thước tối ưu API embedding.
+2. Generate vector.
+3. Upsert vector DB với key `chunk_id`.
+4. Ghi `embeddings.jsonl` + lỗi theo từng batch.
+
+**Baseline đã chốt (Phase 9):**
+- Embedding provider: OpenAI
+- Embedding model: `text-embedding-3-small`
+- Vector store: PostgreSQL 16 + `pgvector`
+- Worker concurrency: `2` (best effort, cost-first)
+
+**Metadata tối thiểu khi upsert:**
+- `chunk_id`
+- `source_url`
+- `page_title`
+- `section_heading`
+- `crawled_at`
+- `run_id`
+- `content_hash`
+
+### Stage 9 – Publish manifest
+
+Sinh `manifest.json` để truy vết lần chạy:
+
+```json
+{
+  "run_id": "2026-04-28T13-40-12Z_fptsoftware-com",
+  "input": {"website": "fptsoftware.com", "limit": 20},
+  "stats": {
+    "discovered_count": 42,
+    "raw_page_count": 20,
+    "chunk_count_total": 640,
+    "chunk_count_delta": 85
+  },
+  "artifacts": {
+    "delta": "out/fptsoftware-com/delta.json",
+    "chunks_delta": "out/fptsoftware-com/chunks_delta.jsonl",
+    "embeddings": "out/fptsoftware-com/embeddings.jsonl"
+  }
+}
+```
+
+### Khuyến nghị vận hành
+
+- Chạy `dry_run` trước để ước lượng chi phí (scrape + embedding).
+- Thiết lập `max_urls_per_run` và `max_embedding_tokens_per_run`.
+- Alert khi `changed_urls` tăng đột biến hoặc tỷ lệ chunk lỗi vượt ngưỡng.
+- URL bị remove: chuyển inactive, expire sau `TTL=7 ngày`.
+
+### Chunk profile cho RAG (đã chốt)
+
+- `CHUNK_MAX_WORDS=220`
+- `CHUNK_MIN_WORDS=50`
+- `CHUNK_OVERLAP_SENTENCES=2`
+

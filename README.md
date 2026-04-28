@@ -261,13 +261,87 @@ Mỗi dòng trong `chunks.jsonl`:
 
 ---
 
-## 9. Roadmap (sau demo)
+## 9. Phase tiếp theo (Phase 9 – Productionization cho RAG)
 
-- [ ] Cache crawl theo `url + content_hash` (Redis / SQLite).
-- [ ] Bổ sung embedding + lưu vector DB (Qdrant / pgvector).
-- [ ] API HTTP (FastAPI) `POST /ingest` để gọi pipeline qua HTTP.
-- [ ] Hỗ trợ tiếng Việt tốt hơn ở bước chunking (segment câu bằng `underthesea`).
-- [ ] Quan sát: structured logs + metrics (Prometheus).
+Phase 9 tập trung đưa demo hiện tại thành service ingest dùng được trong môi trường thật: có cache, incremental update, embedding, vector store, API và quan sát vận hành.
+
+### 9.1 Mục tiêu đầu ra
+
+- Chạy ingest nhiều lần cho cùng domain nhưng chỉ xử lý phần thay đổi (incremental).
+- Sinh embedding và upsert vector DB theo `chunk_id` ổn định.
+- Expose API HTTP để trigger pipeline và truy vấn trạng thái job.
+- Có metrics/logs đủ để debug chất lượng và chi phí.
+
+### 9.2 Phạm vi triển khai đề xuất
+
+- **Infra setup (đã chốt)**: PostgreSQL 16 (metadata/jobs + pgvector), Redis 7.x (queue/cache), deploy Docker Compose trên VM.
+- **Caching & dedupe**: cache theo `normalized_url + content_hash` để bỏ qua page không đổi.
+- **Embedding layer (đã chốt)**: OpenAI `text-embedding-3-small`, upsert vào `pgvector`.
+- **Ingest API**: `POST /ingest`, `GET /jobs/{id}`, `POST /ingest/dry-run`.
+- **Quality controls**: bỏ chunk quá nhiễu/nav; thêm score chất lượng chunk.
+- **Observability**: structured logs, metrics theo stage, thống kê token/credit.
+
+### 9.3 Deliverables tối thiểu
+
+- `out/<slug>/manifest.json` (run_id, input, stats, version).
+- `out/<slug>/delta.json` (URL mới, URL thay đổi, URL bỏ qua).
+- `out/<slug>/embeddings.jsonl` (chunk_id, vector_dim, model, checksum).
+- API docs cho ingest flow + retry policy + rate-limit.
+
+### 9.4 Tiêu chí Done (Phase 9)
+
+- [ ] Re-run cùng domain giảm >= 50% số trang cần scrape khi nội dung ít đổi.
+- [ ] Upsert vector thành công, không duplicate theo `chunk_id`.
+- [ ] API ingest trả trạng thái rõ ràng (queued/running/success/failed).
+- [ ] Có dashboard hoặc log summary theo run (pages, chunks, token est., duration, cost est.).
+
+### 9.5 Kế hoạch chia nhỏ (2 sprint)
+
+- **Sprint A (Tuần 1):** setup infra DB/Redis/Vector + incremental foundation + delta + selective chunking + manifest.
+- **Sprint B (Tuần 2):** embedding/vector upsert + ingest API + observability + hardening.
+
+### 9.6 Baseline config đã chốt
+
+- PostgreSQL: `16` (`pgvector` extension).
+- Redis: `7.x`.
+- Embedding model: `text-embedding-3-small` (cost-first).
+- Chunk size cho RAG: `CHUNK_MAX_WORDS=220`, `CHUNK_MIN_WORDS=50`, `CHUNK_OVERLAP_SENTENCES=2`.
+- Worker concurrency: `2`.
+- Remove policy: inactive + `TTL=7 ngày` trước khi expire.
+
+### 9.7 Chạy hạ tầng local (Docker Compose)
+
+File đã có sẵn:
+- `docker-compose.yml`
+- `docker/init/01-pgvector.sql` (tự bật `CREATE EXTENSION vector`)
+
+Khởi động PostgreSQL 16 + Redis 7:
+
+```powershell
+docker compose up -d
+docker compose ps
+```
+
+Dừng services:
+
+```powershell
+docker compose down
+```
+
+Dừng và xóa luôn dữ liệu local (volumes):
+
+```powershell
+docker compose down -v
+```
+
+Sau khi chạy compose, có thể dùng ngay giá trị trong `.env.example`:
+- `DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/cleaner_raw_data`
+- `REDIS_URL=redis://localhost:6379/0`
+
+Chi tiết kiến trúc và pipeline cho Phase 9:
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (mục Phase 9 Architecture)
+- [`docs/PIPELINE.md`](docs/PIPELINE.md) (mục Phase 9 Incremental + Embedding Pipeline)
+- [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) (checklist chi tiết theo task)
 
 ---
 

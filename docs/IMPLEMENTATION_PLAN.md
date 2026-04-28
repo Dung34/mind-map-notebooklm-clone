@@ -2,12 +2,12 @@
 
 Mục tiêu: triển khai từ tài liệu hiện có thành project Python chạy được end-to-end:
 
-1) Nhận input `company`/`website`  
-2) Search seed URLs bằng Perplexity Search API  
-3) Discover + scrape bằng FireCrawl  
-4) Clean markdown theo pipeline hiện tại  
-5) Chunk + enrich metadata  
-6) Xuất `chunks.jsonl` và thống kê
+1. Nhận input `company`/`website`  
+2. Search seed URLs bằng Perplexity Search API  
+3. Discover + scrape bằng FireCrawl  
+4. Clean markdown theo pipeline hiện tại  
+5. Chunk + enrich metadata  
+6. Xuất `chunks.jsonl` và thống kê
 
 ---
 
@@ -23,7 +23,8 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 ## Phase 0 – Khởi tạo khung dự án
 
 ### Bước 0.1: Chốt cấu trúc thư mục
-- [ ] Tạo khung:
+
+- Tạo khung:
   - `app/config.py`
   - `app/models.py`
   - `app/pipeline.py`
@@ -35,7 +36,8 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
   - `examples/run_demo.py`
 
 ### Bước 0.2: Chốt dependency
-- [ ] Tạo `requirements.txt` tối thiểu:
+
+- Tạo `requirements.txt` tối thiểu:
   - `pydantic`
   - `python-dotenv`
   - `perplexityai`
@@ -44,10 +46,11 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
   - `tenacity` (retry)
 
 ### Bước 0.3: Chốt config runtime
-- [ ] Đồng bộ `.env.example` với 2 key:
+
+- Đồng bộ `.env.example` với 2 key:
   - `PERPLEXITY_API_KEY`
   - `FIRECRAWL_API_KEY`
-- [ ] Add cấu hình pipeline:
+- Add cấu hình pipeline:
   - `FIRECRAWL_MAP_LIMIT`
   - `FIRECRAWL_SCRAPE_CONCURRENCY`
   - `OUTPUT_DIR`
@@ -60,12 +63,14 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 ## Phase 1 – Config + Data Models
 
 ### Bước 1.1: Implement `app/config.py`
-- [ ] Load env bằng `python-dotenv`.
-- [ ] Expose object `Settings` (Pydantic Settings hoặc dataclass).
-- [ ] Validate biến bắt buộc (`PERPLEXITY_API_KEY`, `FIRECRAWL_API_KEY`).
+
+- Load env bằng `python-dotenv`.
+- Expose object `Settings` (Pydantic Settings hoặc dataclass).
+- Validate biến bắt buộc (`PERPLEXITY_API_KEY`, `FIRECRAWL_API_KEY`).
 
 ### Bước 1.2: Implement `app/models.py`
-- [ ] Tạo model:
+
+- Tạo model:
   - `SeedURL`
   - `DiscoveredURL`
   - `RawPage`
@@ -80,19 +85,22 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 ## Phase 2 – Stage 1 (Perplexity Search API)
 
 ### Bước 2.1: Client + hàm search
-- [x] Tạo `Perplexity` client trong `app/search/perplexity_search.py`.
-- [x] Implement `search_seed_urls(company, website, max_results=20)`.
-- [x] Parse `res.results` -> list URL strings.
+
+- Tạo `Perplexity` client trong `app/search/perplexity_search.py`.
+- Implement `search_seed_urls(company, website, max_results=20)`.
+- Parse `res.results` -> list URL strings.
 
 ### Bước 2.2: Normalize + validate seed URLs
-- [x] Implement `normalize_url()`.
-- [x] Merge URL từ search + website input + manual seeds.
-- [x] Dedupe theo `scheme + host + path`.
+
+- Implement `normalize_url()`.
+- Merge URL từ search + website input + manual seeds.
+- Dedupe theo `scheme + host + path`.
 
 ### Bước 2.3: Verify URL sống/chết
-- [x] HEAD/GET nhẹ bằng `httpx`.
-- [x] Retry timeout/5xx (tenacity).
-- [x] Trả `list[SeedURL]` có `source`.
+
+- HEAD/GET nhẹ bằng `httpx`.
+- Retry timeout/5xx (tenacity).
+- Trả `list[SeedURL]` có `source`.
 
 **Tiêu chí xong phase 2:** chạy unit script và in được >= vài seed URL hợp lệ cho 1 công ty thật.
 
@@ -101,17 +109,19 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 ## Phase 3 – Stage 2 (FireCrawl Map)
 
 ### Bước 3.1: Implement map call
-- [x] `app/discover/firecrawl_map.py`
-- [x] Gọi FireCrawl v2 `client.map(...)` với:
+
+- `app/discover/firecrawl_map.py`
+- Gọi FireCrawl v2 `client.map(...)` với:
   - `url`
   - `search` (URL gốc chuẩn hoá)
   - `limit`
   - `include_subdomains`
 
 ### Bước 3.2: Filter URL
-- [x] Blacklist path rác (`/tag`, `/category`, file media...).
-- [x] Optional priority path (`/about`, `/services`, `/contact`...).
-- [x] Convert sang `list[DiscoveredURL]`.
+
+- Blacklist path rác (`/tag`, `/category`, file media...).
+- Optional priority path (`/about`, `/services`, `/contact`...).
+- Convert sang `list[DiscoveredURL]`.
 
 **Tiêu chí xong phase 3:** từ 1 website trả được danh sách URL sạch, không quá noisy.
 
@@ -120,14 +130,16 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 ## Phase 4 – Stage 3 (FireCrawl Scrape)
 
 ### Bước 4.1: Implement scrape one URL
-- [x] `app/crawl/firecrawl_scrape.py`
-- [x] `scrape_url(url)` trả `RawPage`.
-- [x] Lấy markdown + metadata title/language/status.
+
+- `app/crawl/firecrawl_scrape.py`
+- `scrape_url(url)` trả `RawPage`.
+- Lấy markdown + metadata title/language/status.
 
 ### Bước 4.2: Implement scrape many URLs
-- [x] Chạy song song có semaphore theo `FIRECRAWL_SCRAPE_CONCURRENCY`.
-- [x] Skip lỗi từng URL, không fail cả batch.
-- [x] Trả list `RawPage`.
+
+- Chạy song song có semaphore theo `FIRECRAWL_SCRAPE_CONCURRENCY`.
+- Skip lỗi từng URL, không fail cả batch.
+- Trả list `RawPage`.
 
 **Tiêu chí xong phase 4:** scrape thành công ít nhất 5-10 URL trong domain thật.
 
@@ -136,18 +148,21 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 ## Phase 5 – Stage 4 (Cleaner)
 
 ### Bước 5.1: Port code cleaner vào module
-- [x] Đưa nguyên logic:
+
+- Đưa nguyên logic:
   - `strip_markdown`
   - `filter_blocks`
   - `dedup_blocks`
 
 ### Bước 5.2: Adapter từ `RawPage` -> `CleanedPage`
-- [x] Implement `clean_page_markdown(raw_page) -> CleanedPage`.
-- [x] Tính `word_count`.
+
+- Implement `clean_page_markdown(raw_page) -> CleanedPage`.
+- Tính `word_count`.
 
 ### Bước 5.3: Quality guard
-- [x] Nếu text quá ngắn thì gắn cờ/skip theo rule.
-- [x] Log số block trước/sau clean.
+
+- Nếu text quá ngắn thì gắn cờ/skip theo rule.
+- Log số block trước/sau clean.
 
 **Tiêu chí xong phase 5:** output text rõ ràng, không còn menu/footer rõ rệt.
 
@@ -156,7 +171,8 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 ## Phase 6 – Stage 5 (Rule-based Chunking + Enrich)
 
 ### Bước 6.1: Port chunking logic
-- [x] Đưa logic:
+
+- Đưa logic:
   - heading heuristic
   - sentence split
   - `CHUNK_MAX_WORDS`
@@ -164,7 +180,8 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
   - `OVERLAP_SENTENCES` (env: `CHUNK_OVERLAP_SENTENCES`)
 
 ### Bước 6.2: Enrich metadata
-- [x] Implement `enrich_chunks(...)` theo schema hiện tại:
+
+- Implement `enrich_chunks(...)` theo schema hiện tại:
   - `chunk_id`, `source_url`, `page_title`, `section_heading`
   - `text`, `word_count`, `crawled_at`, `chunk_index`
 
@@ -175,19 +192,22 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 ## Phase 7 – Orchestrator + CLI demo
 
 ### Bước 7.1: Implement `run_pipeline`
-- [x] Nối 5 stage theo flow docs.
-- [x] Trả `PipelineResult`.
+
+- Nối 5 stage theo flow docs.
+- Trả `PipelineResult`.
 
 ### Bước 7.2: Ghi artifact ra thư mục output
-- [x] `out/<company-slug>/seeds.json`
-- [x] `out/<company-slug>/discovered.json`
-- [x] `out/<company-slug>/raw/*.json`
-- [x] `out/<company-slug>/cleaned/*.json`
-- [x] `out/<company-slug>/chunks.jsonl`
-- [x] `out/<company-slug>/stats.json`
+
+- `out/<company-slug>/seeds.json`
+- `out/<company-slug>/discovered.json`
+- `out/<company-slug>/raw/*.json`
+- `out/<company-slug>/cleaned/*.json`
+- `out/<company-slug>/chunks.jsonl`
+- `out/<company-slug>/stats.json`
 
 ### Bước 7.3: Demo command
-- [x] `python examples/run_demo.py --company "..." --website "..." --limit 10`
+
+- `python examples/run_demo.py --company "..." --website "..." --limit 10`
 
 **Tiêu chí xong phase 7:** chạy 1 lệnh ra đủ artifacts, không crash.
 
@@ -196,19 +216,120 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 ## Phase 8 – Test tối thiểu trước khi dùng thật
 
 ### Bước 8.1: Unit test
-- [ ] Test `normalize_url`.
-- [ ] Test `strip_markdown/filter_blocks/dedup_blocks`.
-- [ ] Test chunking boundary cases.
+
+- Test `normalize_url`.
+- Test `strip_markdown/filter_blocks/dedup_blocks`.
+- Test chunking boundary cases.
 
 ### Bước 8.2: Integration test nhẹ
-- [ ] 1 domain thật, limit nhỏ (5-10 URL).
-- [ ] Kiểm tra output có chunk, không rỗng, schema đúng.
+
+- 1 domain thật, limit nhỏ (5-10 URL).
+- Kiểm tra output có chunk, không rỗng, schema đúng.
 
 ### Bước 8.3: Regression dataset nhỏ
-- [ ] Tạo 2-3 markdown mẫu "xấu".
-- [ ] So sánh output cleaner/chunker với golden files.
+
+- Tạo 2-3 markdown mẫu "xấu".
+- So sánh output cleaner/chunker với golden files.
 
 **Tiêu chí xong phase 8:** tự tin chạy lặp lại nhiều domain mà không vỡ pipeline.
+
+---
+
+## Phase 9 – Productionization cho RAG
+
+### Checklist tổng (theo luồng triển khai)
+
+- Setup hạ tầng DB/Redis cho ingest jobs, cache, và vector index.
+- Incremental foundation: `normalized_url`, `content_hash`, snapshot index.
+- Selective processing: chỉ re-chunk/re-embed cho `new + changed`.
+- Embedding + vector upsert idempotent theo `chunk_id`.
+- Ingest API: tạo job, theo dõi trạng thái, hỗ trợ `dry_run`.
+- Observability + guardrails: logs, metrics, cost/token limits.
+- QA + rollout: unit/integration test + runbook vận hành.
+
+### Bước 9.0: Setup hạ tầng (Database + Redis + Vector DB)
+
+- Chốt stack: `PostgreSQL 16` + `pgvector` (metadata/jobs/vectors) + `Redis 7.x` (queue/cache).
+- Viết `docker-compose` cho local dev: postgres, redis, qdrant (tuỳ chọn).
+- Thêm biến `.env`:
+  - `DATABASE_URL`
+  - `REDIS_URL`
+  - `VECTOR_DB_URL` (Postgres/pgvector)
+  - `VECTOR_TABLE`
+- Tạo schema metadata:
+  - `ingest_runs`
+  - `page_index` (`normalized_url`, `content_hash`, `last_run_id`)
+  - `chunk_index` (`chunk_id`, `source_url`, `run_id`, `is_active`)
+- Healthcheck kết nối DB/Redis/Vector DB trước khi chạy pipeline.
+
+### Bước 9.1: Incremental ingest (delta)
+
+- Thêm `content_hash` cho `CleanedPage`/metadata index.
+- Thiết kế `previous_index` (`url`, `content_hash`, `updated_at`, `chunk_ids`).
+- So sánh với run trước để sinh `delta.json` (`new/changed/unchanged/removed`).
+- Chỉ xử lý lại URL thay đổi.
+- Ghi `manifest.json` có `run_id`, `pipeline_version`, artifact paths.
+
+### Bước 9.2: Embedding + vector upsert
+
+- Tạo `chunks_delta.jsonl`.
+- Chốt embedding provider/model: OpenAI `text-embedding-3-small`.
+- Tích hợp embedding provider (config qua `.env`).
+- Batch embedding + retry/timeout theo policy.
+- Upsert vào vector DB (Qdrant/pgvector) theo `chunk_id`.
+- Xử lý `removed_urls`: delete hoặc soft-delete vector cũ.
+- Ghi `embeddings.jsonl` (status theo batch/chunk).
+
+### Bước 9.3: Ingest API + job status
+
+- FastAPI endpoint `POST /ingest`.
+- Endpoint `GET /jobs/{run_id}` để theo dõi tiến trình.
+- Hỗ trợ `dry_run` để estimate chi phí.
+- Thêm `POST /ingest/reindex` (re-embed từ cleaned cache, không scrape lại).
+- Chuẩn hoá error contract (`validation_error`, `quota_exceeded`, `upstream_error`...).
+
+### Bước 9.4: Observability + guardrails
+
+- Structured logs theo `run_id`.
+- Metrics stage duration + token/credit estimate.
+- Hard limits: max URL scrape/run, max embedding token/run.
+- Cost summary theo run (`scrape_est`, `embed_est`).
+- Alert khi tỷ lệ lỗi hoặc `changed_urls` tăng bất thường.
+- Chốt lifecycle policy: remove -> inactive, expire `TTL=7 ngày`.
+
+### Bước 9.6: Runtime tuning (baseline)
+
+- Chốt worker concurrency mặc định: `2`.
+- Chốt chunk profile RAG: `CHUNK_MAX_WORDS=220`, `CHUNK_MIN_WORDS=50`, `CHUNK_OVERLAP_SENTENCES=2`.
+- Thêm các giá trị baseline vào `.env.example`/runtime config cho Phase 9.
+
+### Bước 9.5: QA + rollout
+
+- Unit test delta detection (`new/changed/unchanged/removed`).
+- Unit test idempotency `chunk_id`.
+- Integration test 2 lần chạy liên tiếp (lần 2 giảm workload).
+- Backfill script cho artifact demo cũ.
+- Runbook vận hành + rollback checklist.
+
+**Tiêu chí xong phase 9:** chạy incremental ổn định, vector upsert idempotent, có API + observability cơ bản.
+
+### Chia nhỏ công việc (Sprint đề xuất)
+
+**Sprint A (Tuần 1) – Incremental chạy được**
+
+- A1. Setup infra local (PostgreSQL16 + pgvector, Redis7) + env + healthcheck.
+- A2. Hash + snapshot index.
+- A3. Delta detection + `delta.json`.
+- A4. Selective chunking (`chunks_delta.jsonl`) + manifest.
+- A5. Smoke test domain thật (lần 2 giảm URL xử lý).
+
+**Sprint B (Tuần 2) – Vector + API ingest**
+
+- B1. Embedding service (batch + retry).
+- B2. Vector repository (upsert/delete by `chunk_id`).
+- B3. API ingest/job status/dry-run.
+- B4. Metrics + guardrails + cost summary.
+- B5. Hardening + docs/runbook.
 
 ---
 
@@ -219,13 +340,15 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 - **Ngày 3:** Phase 4-5 (scrape + cleaner)
 - **Ngày 4:** Phase 6-7 (chunk + orchestrator + CLI)
 - **Ngày 5:** Phase 8 + fix bug + polish docs
+- **Ngày 6-7:** Phase 9 (incremental + embedding + ingest API)
 
 ---
 
 ## Checklist “Definition of Done”
 
-- [x] Chạy được command demo end-to-end.
-- [x] Có `chunks.jsonl` đúng schema mới.
-- [ ] Không hard-code API key.
-- [ ] Có test tối thiểu cho cleaner + chunker.
-- [ ] Docs khớp với implementation thực tế.
+- Chạy được command demo end-to-end.
+- Có `chunks.jsonl` đúng schema mới.
+- Không hard-code API key.
+- Có test tối thiểu cho cleaner + chunker.
+- Docs khớp với implementation thực tế.
+

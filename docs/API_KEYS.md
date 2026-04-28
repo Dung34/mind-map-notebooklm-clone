@@ -4,6 +4,9 @@ Dự án hiện tại cần **2 API key bắt buộc**:
 - Perplexity (Stage 1: Search API)
 - FireCrawl (Stage 2-3: map/scrape)
 
+Phase 9 (embedding + vector index) cần thêm:
+- OpenAI (Embedding API)
+
 ---
 
 ## 1. Perplexity API
@@ -63,7 +66,54 @@ FIRECRAWL_SCRAPE_ONLY_MAIN=true
 
 ---
 
-## 3. File `.env` đầy đủ
+## 3. OpenAI API (Embedding)
+
+**Mục đích:** Phase 9 – tạo embedding cho chunks (model mặc định: `text-embedding-3-small`).
+
+### Lấy API key
+1. Truy cập <https://platform.openai.com/api-keys>.
+2. Tạo secret key mới -> copy key `sk-...`.
+3. Nạp billing hợp lệ cho project.
+
+### Pricing tham khảo (Embedding)
+
+> Giá có thể thay đổi theo thời gian, luôn kiểm tra trang pricing chính thức trước khi chốt ngân sách.
+
+- Trang pricing: <https://platform.openai.com/docs/pricing>
+- Model đang dùng: `text-embedding-3-small`
+- Cách tính: theo **input tokens**
+
+Ví dụ ước lượng:
+- 1,000,000 tokens input với `text-embedding-3-small`:
+  - nếu đơn giá là **$0.02 / 1M tokens** -> chi phí ~ **$0.02**
+
+Công thức:
+`cost_estimate = (input_tokens / 1_000_000) * unit_price_per_1m_tokens`
+
+### Bảng ước lượng nhanh (tham chiếu)
+
+> Ví dụ dưới đây dùng **đơn giá giả định** `unit_price_per_1m_tokens = $0.02` cho `text-embedding-3-small`.
+> Khi pricing thay đổi, chỉ cần thay biến đơn giá là ra số mới.
+
+| Input tokens | Công thức                 | Chi phí ước lượng |
+|--------------|---------------------------|-------------------|
+| 1,000,000    | `1 * $0.02`               | `$0.02`           |
+| 10,000,000   | `10 * $0.02`              | `$0.20`           |
+| 50,000,000   | `50 * $0.02`              | `$1.00`           |
+
+Khuyến nghị thực tế:
+- Ghi `embedding_tokens_total` vào `stats.json` sau mỗi run.
+- Tính thêm `embedding_cost_estimate_usd` để theo dõi trend chi phí theo domain/tháng.
+
+### Cấu hình
+```env
+OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
+---
+
+## 4. File `.env` đầy đủ
 
 Sao chép `.env.example` -> `.env` rồi điền:
 
@@ -86,14 +136,23 @@ OUTPUT_DIR=./out
 LOG_LEVEL=INFO
 HTTP_TIMEOUT=60
 CLEAN_PAGE_MIN_WORDS=50
-CHUNK_MAX_WORDS=400
-CHUNK_MIN_WORDS=15
+CHUNK_MAX_WORDS=220
+CHUNK_MIN_WORDS=50
 CHUNK_OVERLAP_SENTENCES=2
+
+# === Phase 9 (Productionization) ===
+DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/cleaner_raw_data
+VECTOR_TABLE=rag_chunks
+REDIS_URL=redis://localhost:6379/0
+OPENAI_API_KEY=
+EMBEDDING_MODEL=text-embedding-3-small
+WORKER_CONCURRENCY=2
+INACTIVE_TTL_DAYS=7
 ```
 
 ---
 
-## 4. Bảo mật
+## 5. Bảo mật
 
 - **KHÔNG** commit `.env` lên git – đã có trong `.gitignore`.
 - Khi deploy: dùng secret manager (AWS Secrets Manager, Doppler, 1Password CLI...).
@@ -102,7 +161,7 @@ CHUNK_OVERLAP_SENTENCES=2
 
 ---
 
-## 5. Kiểm tra nhanh API key
+## 6. Kiểm tra nhanh API key
 
 Một script `examples/check_keys.py` (sẽ thêm sau) giúp ping 2 service:
 
