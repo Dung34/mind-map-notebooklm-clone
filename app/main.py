@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,9 +33,27 @@ JobStatus = Literal["queued", "running", "success", "failed"]
 JOBS: dict[str, dict[str, Any]] = {}
 
 
+def _debug_log(run_id: str, hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+    payload = {
+        "sessionId": "72e706",
+        "runId": run_id,
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with Path("debug-72e706.log").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 class IngestRequest(BaseModel):
     company: str | None = None
     website: str | None = None
+    notebooklm_id: str | None = None
     manual_seeds: list[str] = Field(default_factory=list)
     limit: int = Field(default=10, ge=1, le=200)
     no_search: bool = False
@@ -45,6 +64,7 @@ class IngestRequest(BaseModel):
 
 class ReindexRequest(BaseModel):
     website: str
+    notebooklm_id: str | None = None
     limit: int = Field(default=0, ge=0)
 
 
@@ -87,30 +107,68 @@ def _db_upsert_ingest_run(
     *,
     company: str | None,
     website: str | None,
+    notebooklm_id: str,
     status: str,
     total_urls: int = 0,
     processed_urls: int = 0,
     error_message: str | None = None,
     finished: bool = False,
 ) -> None:
+    # region agent log
+    _debug_log(
+        run_id=run_id,
+        hypothesis_id="H1",
+        location="app/main.py:_db_upsert_ingest_run:pre_execute",
+        message="About to upsert ingest_runs row",
+        data={
+            "status": status,
+            "company_present": bool(company),
+            "website_present": bool(website),
+            "notebooklm_id_present": bool(notebooklm_id),
+            "total_urls": total_urls,
+            "processed_urls": processed_urls,
+            "finished": finished,
+        },
+    )
+    # endregion
     with _db_connect() as conn, conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO ingest_runs
-            (run_id, company, website, status, total_urls, processed_urls, error_message)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (run_id, company, website, notebooklm_id, status, total_urls, processed_urls, error_message)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (run_id) DO UPDATE SET
                 company = EXCLUDED.company,
                 website = EXCLUDED.website,
+                notebooklm_id = EXCLUDED.notebooklm_id,
                 status = EXCLUDED.status,
                 total_urls = EXCLUDED.total_urls,
                 processed_urls = EXCLUDED.processed_urls,
                 error_message = EXCLUDED.error_message,
                 finished_at = CASE WHEN %s THEN NOW() ELSE ingest_runs.finished_at END;
             """,
-            (run_id, company, website, status, total_urls, processed_urls, error_message, finished),
+            (
+                run_id,
+                company,
+                website,
+                notebooklm_id,
+                status,
+                total_urls,
+                processed_urls,
+                error_message,
+                finished,
+            ),
         )
         conn.commit()
+    # region agent log
+    _debug_log(
+        run_id=run_id,
+        hypothesis_id="H1",
+        location="app/main.py:_db_upsert_ingest_run:post_execute",
+        message="Upsert ingest_runs completed",
+        data={"status": status},
+    )
+    # endregion
 
 
 def _start_stage(run_id: str, stage: str) -> None:
@@ -147,6 +205,31 @@ def _estimate_tokens_from_text(text: str) -> int:
 
 def _estimate_tokens_from_chunks(chunks: list[Chunk]) -> int:
     return sum(_estimate_tokens_from_text(c.text) for c in chunks)
+
+
+def _resolve_notebooklm_id(req: IngestRequest) -> str:
+    if req.notebooklm_id and req.notebooklm_id.strip():
+        return req.notebooklm_id.strip()
+    base = (req.website or req.company or "default").strip().lower()
+    base = re.sub(r"[^a-z0-9]+", "-", base).strip("-")
+    if not base:
+        base = "default"
+    return f"nb_{base}"
+
+
+def _resolve_notebooklm_id_from_fields(
+    *,
+    notebooklm_id: str | None,
+    company: str | None,
+    website: str | None,
+) -> str:
+    if notebooklm_id and notebooklm_id.strip():
+        return notebooklm_id.strip()
+    base = (website or company or "default").strip().lower()
+    base = re.sub(r"[^a-z0-9]+", "-", base).strip("-")
+    if not base:
+        base = "default"
+    return f"nb_{base}"
 
 
 def _cost_summary(*, scrape_urls: int, embed_tokens: int) -> dict:
@@ -188,12 +271,13 @@ def _enforce_embed_guardrails(embed_tokens: int) -> None:
         )
 
 
-async def _run_ingest_job(run_id: str, req: IngestRequest) -> None:
+async def _run_ingest_job(run_id: str, req: IngestRequest, notebooklm_id: str) -> None:
     try:
         _db_upsert_ingest_run(
             run_id,
             company=req.company,
             website=req.website,
+            notebooklm_id=notebooklm_id,
             status="running",
             total_urls=req.limit,
             processed_urls=0,
@@ -227,6 +311,11 @@ async def _run_ingest_job(run_id: str, req: IngestRequest) -> None:
 
         _start_stage(run_id, "vector_upsert")
         by_id = {c.chunk_id: c for c in chunks}
+        notebooklm_id = _resolve_notebooklm_id_from_fields(
+            notebooklm_id=req.notebooklm_id,
+            company=None,
+            website=req.website,
+        )
         records: list[VectorRecord] = []
         for e in emb_results:
             c = by_id[e.chunk_id]
@@ -241,9 +330,26 @@ async def _run_ingest_job(run_id: str, req: IngestRequest) -> None:
                         "page_title": c.page_title,
                         "section_heading": c.section_heading,
                         "crawled_at": c.crawled_at.isoformat(),
+                        "run_id": run_id,
                     },
+                    notebooklm_id=notebooklm_id,
+                    chunk_text=c.text,
                 )
             )
+        # region agent log
+        _debug_log(
+            run_id=run_id,
+            hypothesis_id="H5",
+            location="app/main.py:_run_ingest_job:records_prepared",
+            message="Prepared vector records for upsert",
+            data={
+                "records_count": len(records),
+                "notebooklm_id": notebooklm_id,
+                "first_record_has_chunk_text": bool(records and records[0].chunk_text),
+                "first_record_has_notebooklm_id": bool(records and records[0].notebooklm_id),
+            },
+        )
+        # endregion
         upserted = 0
         if records:
             repo = PgVectorRepository(vector_dim=records[0].dim)
@@ -255,6 +361,7 @@ async def _run_ingest_job(run_id: str, req: IngestRequest) -> None:
             run_id,
             company=req.company,
             website=req.website,
+            notebooklm_id=notebooklm_id,
             status="success",
             total_urls=int(stats.get("scrape_target_count", req.limit)),
             processed_urls=int(stats.get("cleaned_page_count", 0)),
@@ -282,12 +389,22 @@ async def _run_ingest_job(run_id: str, req: IngestRequest) -> None:
             },
         )
     except Exception as exc:
+        # region agent log
+        _debug_log(
+            run_id=run_id,
+            hypothesis_id="H7",
+            location="app/main.py:_run_ingest_job:exception",
+            message="Ingest background job failed",
+            data={"error": str(exc)},
+        )
+        # endregion
         logger.exception("ingest job failed run_id=%s", run_id)
         try:
             _db_upsert_ingest_run(
                 run_id,
                 company=req.company,
                 website=req.website,
+                notebooklm_id=notebooklm_id,
                 status="failed",
                 total_urls=req.limit,
                 processed_urls=0,
@@ -403,9 +520,25 @@ async def _run_reindex_job(run_id: str, req: ReindexRequest) -> None:
                         "page_title": c.page_title,
                         "section_heading": c.section_heading,
                         "crawled_at": c.crawled_at.isoformat(),
+                        "run_id": run_id,
                     },
+                    notebooklm_id=notebooklm_id,
+                    chunk_text=c.text,
                 )
             )
+        # region agent log
+        _debug_log(
+            run_id=run_id,
+            hypothesis_id="H6",
+            location="app/main.py:_run_reindex_job:records_prepared",
+            message="Prepared reindex vector records for upsert",
+            data={
+                "records_count": len(records),
+                "notebooklm_id": notebooklm_id,
+                "first_record_has_chunk_text": bool(records and records[0].chunk_text),
+            },
+        )
+        # endregion
         repo = PgVectorRepository(vector_dim=records[0].dim if records else 1536)
         repo.ensure_table()
         upserted = repo.upsert_embeddings(records)
@@ -423,6 +556,15 @@ async def _run_reindex_job(run_id: str, req: ReindexRequest) -> None:
             },
         )
     except Exception as exc:
+        # region agent log
+        _debug_log(
+            run_id=run_id,
+            hypothesis_id="H7",
+            location="app/main.py:_run_reindex_job:exception",
+            message="Reindex background job failed",
+            data={"error": str(exc)},
+        )
+        # endregion
         logger.exception("reindex job failed run_id=%s", run_id)
         _set_job(run_id, status="failed", stage="failed", error=str(exc))
 
@@ -446,7 +588,33 @@ async def api_error_handler(_request: Request, exc: ApiError) -> JSONResponse:
 
 @app.post("/ingest")
 async def ingest(req: IngestRequest) -> dict:
+    debug_run_id = f"ingest_req_{uuid4().hex[:8]}"
+    # region agent log
+    _debug_log(
+        run_id=debug_run_id,
+        hypothesis_id="H2",
+        location="app/main.py:ingest:entry",
+        message="Received /ingest request",
+        data={
+            "dry_run": req.dry_run,
+            "no_search": req.no_search,
+            "has_company": bool(req.company),
+            "has_website": bool(req.website),
+            "manual_seeds_count": len(req.manual_seeds),
+            "limit": req.limit,
+        },
+    )
+    # endregion
     if req.no_search and not req.website:
+        # region agent log
+        _debug_log(
+            run_id=debug_run_id,
+            hypothesis_id="H2",
+            location="app/main.py:ingest:validation_error",
+            message="Validation failed for no_search without website",
+            data={},
+        )
+        # endregion
         raise ApiError(
             code="validation_error",
             message="website is required when no_search=true",
@@ -454,31 +622,96 @@ async def ingest(req: IngestRequest) -> dict:
         )
     if req.dry_run:
         try:
+            # region agent log
+            _debug_log(
+                run_id=debug_run_id,
+                hypothesis_id="H3",
+                location="app/main.py:ingest:dry_run_estimate_start",
+                message="Starting dry-run estimate",
+                data={},
+            )
+            # endregion
             return {"dry_run": True, "estimate": _estimate_dry_run(req)}
         except ApiError:
             raise
         except Exception as exc:
+            # region agent log
+            _debug_log(
+                run_id=debug_run_id,
+                hypothesis_id="H3",
+                location="app/main.py:ingest:dry_run_estimate_error",
+                message="Dry-run estimate failed",
+                data={"error": str(exc)},
+            )
+            # endregion
             raise ApiError(code="validation_error", message=str(exc), status_code=400) from exc
 
     payload = req.model_dump()
     payload["dry_run"] = True
+    # region agent log
+    _debug_log(
+        run_id=debug_run_id,
+        hypothesis_id="H3",
+        location="app/main.py:ingest:estimate_start",
+        message="Starting pre-flight estimate for non-dry-run",
+        data={},
+    )
+    # endregion
     estimate = _estimate_dry_run(IngestRequest(**payload))
+    # region agent log
+    _debug_log(
+        run_id=debug_run_id,
+        hypothesis_id="H3",
+        location="app/main.py:ingest:estimate_done",
+        message="Pre-flight estimate completed",
+        data={"estimated_scrape_count": int(estimate.get("estimated_scrape_count", 0))},
+    )
+    # endregion
     _enforce_ingest_guardrails(int(estimate.get("estimated_scrape_count", 0)))
+    notebooklm_id = _resolve_notebooklm_id(req)
+    # region agent log
+    _debug_log(
+        run_id=debug_run_id,
+        hypothesis_id="H1",
+        location="app/main.py:ingest:notebooklm_id_resolved",
+        message="Resolved notebooklm_id for ingest run",
+        data={"notebooklm_id": notebooklm_id},
+    )
+    # endregion
 
     run_id = _new_run_id()
     try:
+        # region agent log
+        _debug_log(
+            run_id=run_id,
+            hypothesis_id="H1",
+            location="app/main.py:ingest:db_upsert_start",
+            message="Starting queued DB upsert",
+            data={},
+        )
+        # endregion
         _db_upsert_ingest_run(
             run_id,
             company=req.company,
             website=req.website,
+            notebooklm_id=notebooklm_id,
             status="queued",
             total_urls=req.limit,
             processed_urls=0,
         )
     except Exception as exc:
+        # region agent log
+        _debug_log(
+            run_id=run_id,
+            hypothesis_id="H1",
+            location="app/main.py:ingest:db_upsert_error",
+            message="Queued DB upsert failed",
+            data={"error": str(exc)},
+        )
+        # endregion
         raise ApiError(code="upstream_error", message=f"database_error: {exc}", status_code=502) from exc
     _set_job(run_id, status="queued", stage="queued", result={"mode": "ingest"})
-    asyncio.create_task(_run_ingest_job(run_id, req))
+    asyncio.create_task(_run_ingest_job(run_id, req, notebooklm_id))
     return {"run_id": run_id, "status_url": f"/jobs/{run_id}"}
 
 

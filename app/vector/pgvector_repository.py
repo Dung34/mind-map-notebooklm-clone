@@ -20,6 +20,9 @@ class VectorRecord:
     dim: int
     vector: list[float]
     metadata: dict
+    notebooklm_id: str
+    chunk_text: str
+    is_active: bool = True
 
 
 def _vector_literal(values: list[float]) -> str:
@@ -55,6 +58,9 @@ class PgVectorRepository:
                     dim INTEGER NOT NULL,
                     embedding vector({self.vector_dim}) NOT NULL,
                     metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    notebooklm_id TEXT NOT NULL,
+                    chunk_text TEXT NOT NULL,
+                    is_active BOOLEAN NOT NULL DEFAULT true,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
@@ -77,14 +83,17 @@ class PgVectorRepository:
                 cur.execute(
                     f"""
                     INSERT INTO {self.table_name}
-                    (chunk_id, source_url, embedding_model, dim, embedding, metadata, updated_at)
-                    VALUES (%s, %s, %s, %s, %s::vector, %s::jsonb, NOW())
+                    (chunk_id, source_url, embedding_model, dim, embedding, metadata, notebooklm_id, chunk_text, is_active, updated_at)
+                    VALUES (%s, %s, %s, %s, %s::vector, %s::jsonb, %s, %s, %s, NOW())
                     ON CONFLICT (chunk_id) DO UPDATE SET
                         source_url = EXCLUDED.source_url,
                         embedding_model = EXCLUDED.embedding_model,
                         dim = EXCLUDED.dim,
                         embedding = EXCLUDED.embedding,
                         metadata = EXCLUDED.metadata,
+                        notebooklm_id = EXCLUDED.notebooklm_id,
+                        chunk_text = EXCLUDED.chunk_text,
+                        is_active = EXCLUDED.is_active,
                         updated_at = NOW();
                     """,
                     (
@@ -94,6 +103,9 @@ class PgVectorRepository:
                         r.dim,
                         _vector_literal(r.vector),
                         json.dumps(r.metadata, ensure_ascii=False),
+                        r.notebooklm_id,
+                        r.chunk_text,
+                        r.is_active,
                     ),
                 )
             conn.commit()

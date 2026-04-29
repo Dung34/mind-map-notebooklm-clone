@@ -46,6 +46,18 @@ class Settings(BaseSettings):
     SCRAPE_EST_COST_PER_URL_USD: float = Field(default=0.01, ge=0.0, le=10.0)
     EMBED_EST_COST_PER_1K_TOKENS_USD: float = Field(default=0.00002, ge=0.0, le=1.0)
 
+    MINDMAP_LLM_MODEL: str = "gpt-4o-mini"
+    MINDMAP_LLM_TEMPERATURE: float = Field(default=0.2, ge=0.0, le=2.0)
+    MINDMAP_TOPIC_REPR_K: int = Field(default=5, ge=1, le=20)
+    MINDMAP_MAX_DEPTH: int = Field(default=3, ge=1, le=10)
+    MINDMAP_MIN_RECURSE_SIZE: int = Field(default=12, ge=2, le=10000)
+    MINDMAP_SUB_MIN_CLUSTER_SIZE: int = Field(default=3, ge=2, le=1000)
+    MINDMAP_NER_PROVIDER: str = "spacy"
+    MINDMAP_NER_MODEL: str = "xx_ent_wiki_sm"
+    MINDMAP_MAX_VECTORS_PER_RUN: int = Field(default=10000, ge=1, le=500000)
+    MINDMAP_MAX_LLM_CALLS_PER_RUN: int = Field(default=200, ge=0, le=10000)
+    MINDMAP_MAX_TOKENS_PER_RUN: int = Field(default=200000, ge=1000, le=100000000)
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()

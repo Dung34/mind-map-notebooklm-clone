@@ -261,7 +261,11 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
   - `page_index` (`normalized_url`, `content_hash`, `last_run_id`)
   - `chunk_index` (`chunk_id`, `source_url`, `run_id`, `is_active`)
 - Healthcheck kết nối DB/Redis/Vector DB trước khi chạy pipeline.
-- Thiết lập migration tool (`Alembic`) và migration baseline cho 3 bảng metadata.
+- Thiết lập migration tool (`Alembic`) với 1 baseline migration duy nhất tạo đủ schema nền:
+  - `ingest_runs`
+  - `page_index`
+  - `chunk_index`
+  - `rag_chunks`
 
 ### Bước 9.1: Incremental ingest (delta)
 
@@ -319,7 +323,7 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 **Sprint A (Tuần 1) – Incremental chạy được**
 
 - [x] A1a. Setup infra local (PostgreSQL16 + pgvector, Redis7) + env + healthcheck.
-- [x] A1b. Setup Alembic + migration baseline (`ingest_runs`, `page_index`, `chunk_index`).
+- [x] A1b. Setup Alembic + single baseline migration (`ingest_runs`, `page_index`, `chunk_index`, `rag_chunks`).
 - [x] A2. Hash + snapshot index (`page_index_latest.json`, `page_index_snapshot_<run_id>.json`).
 - [x] A3. Delta detection + `delta.json`.
 - [x] A4. Selective chunking (`chunks_delta.jsonl`) + manifest.
@@ -328,7 +332,7 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 **Definition of done cho A1**
 - [x] `docker compose up -d` và services báo `healthy`.
 - [x] Chạy `alembic upgrade head` thành công trên Postgres local.
-- [x] Verify có đủ 3 bảng metadata trong DB.
+- [x] Verify có đủ 4 bảng nền trong DB (`ingest_runs`, `page_index`, `chunk_index`, `rag_chunks`).
 
 **Sprint B (Tuần 2) – Vector + API ingest**
 
@@ -340,6 +344,196 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 
 ---
 
+## Phase 10 – MindMap Builder (Vector → Tree → OPML)
+
+> Đặc tả chi tiết: [`MINDMAP.md`](MINDMAP.md). Phase này dựng mindmap từ vectors đã upsert ở Phase 9.
+
+### Checklist tổng
+
+- Lấy vectors theo scope (`by_website` / `by_run_id` / `by_chunk_ids`) từ pgvector.
+- Reduce dim (UMAP) → cluster (HDBSCAN) top-level.
+- Đặt tên branch bằng LLM (chunk đại diện gần centroid).
+- Recursive sub-cluster đến `MAX_DEPTH` hoặc cluster đủ nhỏ.
+- NER cho leaf (spaCy mặc định, LLM optional).
+- Build JSON tree với citation = `chunk_ids`, roll-up từ leaf lên root.
+- LLM synthesis viết description cho mỗi node.
+- Export OPML 2.0 + ghi artifacts dưới `out/<slug>/mindmap/<mindmap_run_id>/`.
+- Bảng metadata `mindmap_runs` (Alembic migration mới).
+- Chốt scope đa run theo `notebooklm_id`, và lưu `chunk_text` trực tiếp ở `rag_chunks`.
+- Endpoint `POST /mindmap/build`, `GET /mindmap/{id}`, `/tree`, `/opml`.
+- Observability + guardrails (token budget, max vectors, dry-run).
+
+### Bước 10.0: Setup hạ tầng & dependency
+
+- Thêm vào `requirements.txt`:
+  - `numpy`
+  - `umap-learn`
+  - `hdbscan`
+  - `scikit-learn`
+  - `spacy` + model `xx_ent_wiki_sm` (download riêng)
+  - `lxml` (cho OPML output đẹp, optional)
+- Thêm `.env` keys (giữ default trong `app/config.py`):
+  - `MINDMAP_LLM_MODEL=gpt-4o-mini`
+  - `MINDMAP_LLM_TEMPERATURE=0.2`
+  - `MINDMAP_TOPIC_REPR_K=5`
+  - `MINDMAP_MAX_DEPTH=3`
+  - `MINDMAP_MIN_RECURSE_SIZE=12`
+  - `MINDMAP_SUB_MIN_CLUSTER_SIZE=3`
+  - `MINDMAP_NER_PROVIDER=spacy`
+  - `MINDMAP_NER_MODEL=xx_ent_wiki_sm`
+  - `MINDMAP_MAX_VECTORS_PER_RUN=10000`
+  - `MINDMAP_MAX_LLM_CALLS_PER_RUN=200`
+  - `MINDMAP_MAX_TOKENS_PER_RUN=200000`
+- Alembic migration `create_mindmap_runs` (theo schema ở `MINDMAP.md` §4.3).
+- Lưu ý migration hiện tại:
+  - notebook scope (`notebooklm_id`) và `chunk_text` đã nằm trong baseline schema.
+  - Phase 10 chỉ cần thêm migration mới cho `mindmap_runs` (không cần tách 2-phase cho các cột này).
+
+**Definition of done 10.0:**
+- `pip install -r requirements.txt` xong, import `hdbscan`/`umap` không lỗi.
+- `alembic upgrade head` tạo bảng `mindmap_runs`.
+- `python -m spacy download xx_ent_wiki_sm` thành công (hoặc fallback skip NER có log).
+- Có kế hoạch migration 2-phase: add nullable + backfill + enforce `NOT NULL`.
+
+### Bước 10.1: Vector loader
+
+- Implement `app/mindmap/vector_loader.py`:
+  - `load_vectors_by_website(host)` → `(chunk_ids, np.ndarray, meta_by_id)`.
+  - `load_vectors_by_run_id(run_id)`.
+  - `load_vectors_by_chunk_ids(ids)`.
+- Đọc trực tiếp `chunk_text` từ `rag_chunks` để dùng cho topic + NER.
+- Enforce filter `notebooklm_id` ở mọi mode.
+- Validate: dim đồng nhất, không có vector NaN.
+- Fail rõ ràng nếu scope rỗng (`not_found_vectors`).
+
+**DOD 10.1:** Smoke `examples/check_phase10_c1.py` in ra `vector_count`, `unique_urls` cho `fptsoftware-com`.
+
+### Bước 10.2: Dim reduction + HDBSCAN top-level
+
+- Implement `app/mindmap/reducer.py` (UMAP wrapper, `random_state=42`).
+- Implement `app/mindmap/clusterer.py`:
+  - `cluster_top(vectors, params)` → `labels`, metrics (`noise_ratio`, `cluster_count`, `mean_size`).
+- Bypass UMAP nếu `N < 20` (dùng cosine distance trực tiếp).
+- Ghi `clusters_top.json` cho debug.
+
+**DOD 10.2:** Smoke trả `cluster_count >= 2` và `noise_ratio < 0.5` trên dataset `fptsoftware-com`.
+
+### Bước 10.3: Representative + Topic Extraction
+
+- Implement `app/mindmap/representative.py` (top-K theo cosine sim với centroid).
+- Implement `app/mindmap/topic_extractor.py`:
+  - Prompt theo `MINDMAP.md` §5.5.
+  - Strict JSON parse + retry 1 lần nếu invalid.
+  - Hợp đồng output: `{title, summary}`.
+- Tích hợp guardrail `MINDMAP_MAX_LLM_CALLS_PER_RUN`.
+
+**DOD 10.3:** Mỗi top-level cluster có `title` (3–7 từ) + `summary` (≤ 30 từ).
+
+### Bước 10.4: Recursive sub-clustering
+
+- Implement `cluster_recursive(cluster_chunks, depth, params)` trong `clusterer.py`.
+- Áp dụng `MIN_RECURSE_SIZE`, `SUB_MIN_CLUSTER_SIZE`, `MAX_DEPTH`.
+- Đảm bảo idempotent về thứ tự (sort cluster theo size giảm dần).
+- Mỗi sub-cluster cũng đi qua Topic Extraction.
+
+**DOD 10.4:** Cây cluster có ít nhất 1 nhánh có sub-branch trên dataset thật, depth ≤ `MAX_DEPTH`.
+
+### Bước 10.5: NER cho leaf
+
+- Implement `app/mindmap/ner.py`:
+  - Provider `spacy` mặc định, fallback `[]` nếu model thiếu.
+  - Provider `llm` (optional, dùng prompt JSON strict).
+- Aggregate top-K entities theo (`text`, `label`).
+- Lưu `entities.json`.
+
+**DOD 10.5:** Mỗi leaf có ≤ `NER_TOP_K` entities; nếu spaCy fail thì log + entities rỗng (không crash).
+
+### Bước 10.6: Build JSON tree + roll-up citations
+
+- Implement `app/mindmap/tree_builder.py`:
+  - Roll-up `chunk_ids` từ leaf lên root.
+  - Sinh `id` ổn định trong build (`n_<depth>_<index>`).
+  - Validate: tổng số `chunk_ids` ở root = số input vectors.
+- Output `mindmap.json`.
+
+**DOD 10.6:** `mindmap.json` parse được, mọi `chunk_ids` đều có trong `rag_chunks`.
+
+### Bước 10.7: LLM synthesis
+
+- Implement `app/mindmap/synthesizer.py`:
+  - Leaf prompt: chunk + entities → 1 câu.
+  - Non-leaf: titles + summaries của children → 1–2 câu.
+  - Root: top-level titles → 2–3 câu.
+- Cờ `MINDMAP_SKIP_SYNTHESIS=true` để bỏ qua.
+- Update `description` field trong tree.
+
+**DOD 10.7:** Mỗi node có `description` ≠ rỗng (trừ khi skip).
+
+### Bước 10.8: OPML export
+
+- Implement `app/mindmap/opml_exporter.py`:
+  - OPML 2.0, escape XML đầy đủ.
+  - Attribute `_chunkIds` cho leaf.
+  - Output `mindmap.opml` UTF-8.
+- Smoke test: import file vào XMind / Logseq, không lỗi parse.
+
+**DOD 10.8:** File OPML mở được, hiển thị đúng cấu trúc cây.
+
+### Bước 10.9: Service orchestrator + API
+
+- Implement `app/mindmap/service.py` (`build_mindmap(...)`).
+- Implement `app/mindmap/repository.py` (CRUD `mindmap_runs`).
+- Thêm endpoint trong `app/main.py`:
+  - `POST /mindmap/build`
+  - `GET /mindmap/{id}`
+  - `GET /mindmap/{id}/tree`
+  - `GET /mindmap/{id}/opml`
+- Xử lý `dry_run=true` → không gọi LLM, trả estimate.
+
+**DOD 10.9:** Chạy 1 lệnh `curl POST /mindmap/build` ra `mindmap_run_id`, `GET /mindmap/{id}` báo `success` sau khi pipeline xong.
+
+### Bước 10.10: Observability + guardrails
+
+- Stage durations + counts vào `manifest.json`.
+- Cảnh báo `noise_ratio > 0.5`.
+- Hard limit `MAX_VECTORS_PER_RUN`, `MAX_LLM_CALLS_PER_RUN`, `MAX_TOKENS_PER_RUN`.
+- Cost summary trả trong response.
+
+**DOD 10.10:** Vượt budget → trả `quota_exceeded`, không bắt đầu build.
+
+### Bước 10.11: QA + smoke + docs
+
+- Unit test:
+  - Tree roll-up đúng số chunk.
+  - OPML escape ký tự đặc biệt.
+  - Topic extractor parse JSON robust.
+- Smoke E2E trên `fptsoftware-com`.
+- Cập nhật `README.md` + `RUNBOOK.md` cho flow mindmap.
+
+**Tiêu chí xong Phase 10:**
+- API build mindmap end-to-end ổn định.
+- OPML render được trên XMind/Logseq.
+- Re-run idempotent (cùng input → tree gần như nhau).
+- Có guardrail + dry-run.
+
+### Sprint đề xuất Phase 10
+
+**Sprint C (Tuần 3) – Cluster + Topic**
+
+- [ ] C1. Bước 10.0 + 10.1 (deps + vector loader).
+- [ ] C2. Bước 10.2 (UMAP + HDBSCAN top-level).
+- [ ] C3. Bước 10.3 (representative + topic extraction).
+- [ ] C4. Bước 10.4 (recursive sub-cluster).
+
+**Sprint D (Tuần 4) – Tree + Render + API**
+
+- [ ] D1. Bước 10.5 (NER) + 10.6 (tree builder).
+- [ ] D2. Bước 10.7 (synthesis) + 10.8 (OPML).
+- [ ] D3. Bước 10.9 (service + API + Alembic).
+- [ ] D4. Bước 10.10 + 10.11 (guardrails, QA, docs).
+
+---
+
 ## Kế hoạch thực thi đề xuất (theo ngày)
 
 - **Ngày 1:** Phase 0-1 (khung + config + models)
@@ -348,6 +542,8 @@ Mục tiêu: triển khai từ tài liệu hiện có thành project Python ch�
 - **Ngày 4:** Phase 6-7 (chunk + orchestrator + CLI)
 - **Ngày 5:** Phase 8 + fix bug + polish docs
 - **Ngày 6-7:** Phase 9 (incremental + embedding + ingest API)
+- **Ngày 8-9:** Phase 10 Sprint C (cluster + topic)
+- **Ngày 10-11:** Phase 10 Sprint D (tree + render + API)
 
 ---
 

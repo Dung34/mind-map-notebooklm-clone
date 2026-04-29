@@ -335,3 +335,92 @@ Thông số RAG baseline:
 - `CHUNK_MIN_WORDS=50`
 - `CHUNK_OVERLAP_SENTENCES=2`
 
+---
+
+## 10. Phase 10 Architecture – MindMap Builder (vector → tree → OPML)
+
+> Đặc tả chi tiết: [`MINDMAP.md`](MINDMAP.md). Kế hoạch triển khai: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §Phase 10.
+
+### 10.1 Logical components
+
+```mermaid
+flowchart LR
+    A["pgvector: rag_chunks<br/>(notebooklm_id + chunk_text)"] --> B[Vector Loader]
+    B --> C[UMAP + HDBSCAN]
+    C --> D[Topic Extractor (LLM)]
+    D --> E[Recursive Clusterer]
+    E --> F[NER (spaCy/LLM)]
+    F --> G[Tree Builder + roll-up]
+    G --> H[Synthesizer (LLM)]
+    H --> I[OPML Exporter]
+    H --> J[(mindmap_runs)]
+    I --> K["Artifacts<br/>mindmap.json + .opml"]
+```
+
+- **Vector Loader**: scope theo `by_website` (default), `by_run_id`, `by_chunk_ids` và luôn filter `notebooklm_id`.
+- **Clusterer**: UMAP `1536→8` cosine, HDBSCAN top-level + recursive.
+- **Topic Extractor**: LLM `gpt-4o-mini`, prompt strict JSON, dùng top-K chunk gần centroid.
+- **NER**: spaCy `xx_ent_wiki_sm` mặc định cho leaf; LLM-NER là tuỳ chọn.
+- **Tree Builder**: ráp JSON tree, citation = `chunk_ids` (roll-up từ leaf lên root).
+- **Synthesizer**: LLM viết description ngắn cho mỗi node (skip được).
+- **OPML Exporter**: OPML 2.0 với attribute `_chunkIds` để link ngược.
+
+### 10.2 Data contracts mới
+
+- `**mindmap.json**`: tree node có `id`, `title`, `summary`, `description`, `chunk_ids`, `entities`, `children`.
+- `**mindmap.opml**`: OPML 2.0, có `_chunkIds` attribute.
+- `**manifest.json**` (mindmap): `mindmap_run_id`, params, stats, stage durations.
+- DB `**mindmap_runs**`: `mindmap_run_id` (PK), `ingest_run_id` FK, `notebooklm_id`, `scope_mode`, `status`, counts, `params`.
+- DB `**rag_chunks**`: thêm `notebooklm_id` (NOT NULL) và `chunk_text` để topic/NER đọc trực tiếp từ DB.
+
+### 10.3 Quyết định thiết kế
+
+#### 10.3.1 Tại sao UMAP trước HDBSCAN?
+
+| Phương án                        | Ưu                                            | Nhược                                              |
+| -------------------------------- | --------------------------------------------- | -------------------------------------------------- |
+| HDBSCAN trực tiếp 1536-dim       | Đơn giản                                      | Curse-of-dimensionality, mọi điểm gần nhau         |
+| **UMAP `1536→8` rồi HDBSCAN**    | Cluster sạch, ổn định, reproducible           | Thêm 1 dependency, cần `random_state` để reproduce |
+| PCA → KMeans                     | Nhanh                                         | Phải chốt số cluster trước, không có noise label   |
+
+Chọn UMAP+HDBSCAN vì cho noise label rõ (nhánh "Misc / Unclustered") và không cần biết trước số cluster.
+
+#### 10.3.2 Tại sao recursive cluster thay vì 1 lần phẳng?
+
+- Mindmap cần phân cấp (root → branch → sub-branch → leaf).
+- Recursive cho phép sub-branch phản ánh nuance ngữ nghĩa con của 1 chủ đề lớn.
+- HDBSCAN chạy lại trên subset thường tách được sub-cluster rõ hơn nhờ scale-locality.
+
+#### 10.3.3 Tại sao LLM cho topic name + synthesis nhưng spaCy cho NER?
+
+- **Topic + synthesis**: cần ngôn ngữ tự nhiên, gọn, có sense → LLM rất phù hợp, gọi ít lần (≈ số node).
+- **NER**: gọi mỗi leaf → tổng số call lớn, spaCy offline đủ tốt cho ORG/LOC/PER và rẻ hơn nhiều.
+- LLM-NER vẫn để như tuỳ chọn `MINDMAP_NER_PROVIDER=llm` cho domain tiếng Việt khó.
+
+#### 10.3.4 Tại sao OPML thay vì FreeMind / SVG?
+
+- OPML 2.0 là format text, dễ generate, dễ diff git.
+- XMind, Logseq, MarkMap, Workflowy đều import được.
+- Cho phép gắn metadata custom (`_chunkIds`) mà không phá format.
+
+### 10.4 Idempotency & reproducibility
+
+- UMAP `random_state=42` cố định → cluster top-level reproducible.
+- HDBSCAN deterministic theo cùng input.
+- LLM topic + synthesis có nhiệt độ thấp (`0.2`) → vẫn có nhiễu nhỏ giữa các lần build (không reproducible 100% phần text).
+- `mindmap_run_id` mới mỗi lần build, nhưng có thể reuse `ingest_run_id` để diff giữa các lần build.
+
+### 10.5 Cost & guardrails
+
+- Token budget `MINDMAP_MAX_TOKENS_PER_RUN` áp cứng (mặc định 200k).
+- `dry_run=true` chỉ load vectors + estimate, không gọi LLM.
+- Hard limit `MAX_VECTORS_PER_RUN=10000`.
+- Cost summary trả trong API response giống Phase 9 (`topic_calls`, `synthesis_calls`, `estimated_tokens`, `estimated_cost_usd`).
+
+### 10.6 Multi-run merge policy (đã chốt)
+
+- Đơn vị isolation là `notebooklm_id` (không phải `website`).
+- Build mặc định theo active set:
+  - `WHERE notebooklm_id = :notebooklm_id AND is_active = true`.
+- `by_run_id` chỉ dùng cho audit/reproducibility, vẫn bắt buộc cùng `notebooklm_id`.
+

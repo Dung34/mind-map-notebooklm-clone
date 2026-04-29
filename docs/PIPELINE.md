@@ -487,3 +487,196 @@ Sinh `manifest.json` để truy vết lần chạy:
 - `CHUNK_MIN_WORDS=50`
 - `CHUNK_OVERLAP_SENTENCES=2`
 
+---
+
+## Phase 10 – MindMap Builder (vector → tree → OPML)
+
+> Đặc tả đầy đủ ở [`MINDMAP.md`](MINDMAP.md). Phần dưới đây giữ format Stage để liền mạch với Phase 9.
+
+Phase 10 bắt đầu sau khi pipeline Phase 9 đã upsert vector vào pgvector. Output cuối là 1 file `mindmap.opml` render được trên XMind / Logseq, kèm `mindmap.json` có citation về `chunk_id`.
+
+```
+vector + chunk_id (pgvector)
+    → HDBSCAN (cluster toàn bộ)
+    → Gom chunk_id theo cluster
+    → Topic extraction (LLM đặt tên branch)
+    → Recursive clustering (tìm sub-branch)
+    → NER (tìm leaf)
+    → JSON tree (citation = chunk_ids)
+    → LLM synthesis (mô tả node)
+    → OPML → render
+```
+
+### Stage 10 – Vector loading & scope selection
+
+**Mục tiêu:** lấy đúng tập vectors cần build mindmap.
+
+**Input:** scope (`by_website` / `by_run_id` / `by_chunk_ids`).
+
+**Process:**
+1. Query `rag_chunks` theo scope + `notebooklm_id` (xem `MINDMAP.md` §3).
+2. Convert sang `numpy.ndarray (N, 1536)`.
+3. Dùng trực tiếp `chunk_text` trong `rag_chunks` cho topic + NER (không phụ thuộc `chunks.jsonl`).
+4. Validate dim đồng nhất, không có vector NaN.
+
+**Output:**
+- `vectors_snapshot.jsonl` (debug)
+- In-memory: `chunk_ids`, `vectors`, `meta_by_id`, `text_by_id`.
+
+**Pitfalls:**
+- Scope rỗng → trả `not_found_vectors`, không build.
+- Thiếu `notebooklm_id` hoặc không khớp scope → `validation_error`.
+- Khác `embedding_model` trong cùng scope → từ chối, yêu cầu reindex.
+
+### Stage 11 – Dim reduction + HDBSCAN top-level
+
+**Mục tiêu:** gom chunk thành cluster top-level theo chủ đề.
+
+**Process:**
+1. UMAP `1536 → 8` (`metric=cosine`, `random_state=42`).
+2. HDBSCAN `min_cluster_size=5`, `min_samples=2`, `metric=euclidean`.
+3. Tách noise (`label = -1`) thành cluster đặc biệt **"Misc / Unclustered"**.
+
+**Output:**
+- `clusters_top.json`: `{cluster_label: [chunk_ids]}` + noise.
+- Metrics: `cluster_count`, `noise_ratio`, `mean_cluster_size`.
+
+**Pitfalls:**
+- `N < 20` → bỏ UMAP, dùng cosine distance trực tiếp.
+- Tất cả chunk vào noise → HDBSCAN tham số quá chặt, hạ `min_cluster_size`.
+
+### Stage 12 – Representative + Topic extraction (LLM)
+
+**Mục tiêu:** đặt tên + tóm tắt cho mỗi cluster.
+
+**Process:**
+1. Tính centroid mỗi cluster.
+2. Lấy top-`K=5` chunk gần centroid nhất theo cosine sim.
+3. Gọi LLM (`gpt-4o-mini`, `temperature=0.2`) với prompt strict JSON `{"title", "summary"}`.
+4. Retry 1 lần nếu output không parse được JSON.
+
+**Output:**
+- `topics.json`: `{node_id: {title, summary, representative_chunk_ids}}`.
+
+**Pitfalls:**
+- LLM trả prefix kiểu "Topic: ..." → strict JSON + retry.
+- Cluster < `K` chunk → lấy hết.
+- Token limit cho excerpt: `MINDMAP_TOPIC_TEXT_LIMIT=600` ký tự / chunk.
+
+### Stage 13 – Recursive sub-clustering
+
+**Mục tiêu:** tìm sub-branch trong từng cluster lớn.
+
+**Process:**
+```
+def build_subtree(cluster_chunks, depth):
+    if depth >= MAX_DEPTH: return leaf
+    if size < MIN_RECURSE_SIZE: return leaf
+    sub = umap_local(vectors)
+    sub_labels = hdbscan_local(sub, min_cluster_size=3)
+    if num_real_clusters(sub_labels) < 2: return leaf
+    for child in group_by(sub_labels):
+        recurse(child, depth + 1)
+```
+
+**Default params:**
+- `MAX_DEPTH=3`
+- `MIN_RECURSE_SIZE=12`
+- `SUB_MIN_CLUSTER_SIZE=3`
+- `SUB_N_NEIGHBORS=8`
+
+**Output:** `clusters_tree_raw.json` (cây cluster, chưa có topic name level con).
+
+**Pitfalls:**
+- Sub-cluster sinh ra 1 cluster duy nhất + noise → coi như leaf.
+- Đệ quy quá sâu → bắt cứng `MAX_DEPTH` để bảo vệ cost LLM.
+
+### Stage 14 – NER cho leaf
+
+**Mục tiêu:** bổ sung entity (PERSON / ORG / PRODUCT / LOC / DATE / EVENT...) cho mỗi leaf để mindmap "có móc treo".
+
+**Default provider:** spaCy `xx_ent_wiki_sm` (multilingual, offline).
+
+**Process:**
+1. Concat text của tối đa `NER_MAX_CHUNKS=20` chunk trong leaf.
+2. Cắt còn `NER_TEXT_LIMIT=8000` ký tự.
+3. Trích entity bằng spaCy → đếm tần suất → top-`NER_TOP_K=8`.
+4. Output `[{text, label, count}]`.
+
+**Output:** `entities.json`.
+
+**Pitfalls:**
+- spaCy model thiếu → log + ghi `entities=[]`, không crash pipeline.
+- spaCy multilingual yếu cho domain công nghệ tiếng Việt → fallback LLM-NER (provider `llm`).
+
+### Stage 15 – Build JSON tree + citation roll-up
+
+**Mục tiêu:** ráp tree theo schema cuối cùng, đảm bảo citation đúng.
+
+**Process:**
+1. Duyệt cây cluster bottom-up.
+2. Mỗi leaf: gắn `chunk_ids = list of chunk trong cluster`, `entities`, `representative_chunk_ids`.
+3. Mỗi non-leaf: `chunk_ids = ⋃ chunk_ids của children`, `representative_chunk_ids = top-K theo centroid của chính nó`.
+4. Validate: `len(root.chunk_ids) == N` (tổng số vectors load vào).
+
+**Output:** `mindmap.json` (schema ở `MINDMAP.md` §4.1).
+
+**Pitfalls:**
+- Bug roll-up dễ làm tổng số chunk root ≠ N → bắt buộc assert.
+- Quên include cluster "Misc / Unclustered" → mất citation.
+
+### Stage 16 – LLM synthesis (descriptions)
+
+**Mục tiêu:** thêm field `description` cho mỗi node để mindmap "đọc được".
+
+**Process:**
+- Leaf: top-3 chunk + entities → 1 câu.
+- Non-leaf: titles + summaries của children → 1–2 câu.
+- Root: titles của top-level branches → 2–3 câu.
+
+**Flag:**
+- `MINDMAP_SKIP_SYNTHESIS=true` → bỏ stage này (giữ summary từ topic extraction).
+
+**Pitfalls:**
+- Cost tăng tuyến tính theo số node → áp budget `MINDMAP_MAX_TOKENS_PER_RUN`.
+- LLM đôi khi viết quá dài → set `max_tokens=120` cho leaf, `max_tokens=200` cho root.
+
+### Stage 17 – OPML export
+
+**Mục tiêu:** render được trên các tool mindmap phổ biến.
+
+**Format:** OPML 2.0 (xem `MINDMAP.md` §5.9).
+
+**Output:** `mindmap.opml` (UTF-8, attribute custom `_chunkIds`).
+
+**Pitfalls:**
+- Không escape `&`, `<`, `"` trong title/summary → file lỗi parse.
+- Dùng `lxml` cho output đẹp; fallback `xml.etree.ElementTree` nếu thiếu.
+
+### Output cuối Phase 10
+
+```
+out/<slug>/mindmap/<mindmap_run_id>/
+├── vectors_snapshot.jsonl
+├── clusters_top.json
+├── clusters_tree_raw.json
+├── topics.json
+├── entities.json
+├── mindmap.json          # artifact chính
+├── mindmap.opml          # render được
+├── manifest.json
+└── stats.json
+```
+
+DB: bảng `mindmap_runs` lưu `mindmap_run_id`, `notebooklm_id`, scope, status, counts, params.
+
+API:
+- `POST /mindmap/build`
+- `GET  /mindmap/{id}`
+- `GET  /mindmap/{id}/tree`
+- `GET  /mindmap/{id}/opml`
+
+Mọi route mindmap phải enforce scope:
+
+`WHERE notebooklm_id = :notebooklm_id AND is_active = true`
+
