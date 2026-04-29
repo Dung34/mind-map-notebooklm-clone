@@ -49,14 +49,24 @@ class Settings(BaseSettings):
     MINDMAP_LLM_MODEL: str = "gpt-4o-mini"
     MINDMAP_LLM_TEMPERATURE: float = Field(default=0.2, ge=0.0, le=2.0)
     MINDMAP_TOPIC_REPR_K: int = Field(default=5, ge=1, le=20)
+    MINDMAP_TOPIC_TEXT_LIMIT: int = Field(default=600, ge=100, le=8000)
     MINDMAP_MAX_DEPTH: int = Field(default=3, ge=1, le=10)
     MINDMAP_MIN_RECURSE_SIZE: int = Field(default=12, ge=2, le=10000)
     MINDMAP_SUB_MIN_CLUSTER_SIZE: int = Field(default=3, ge=2, le=1000)
+    MINDMAP_SUB_MIN_SAMPLES: int = Field(default=2, ge=1, le=10000)
+    MINDMAP_SUB_N_NEIGHBORS: int = Field(default=8, ge=2, le=200)
     MINDMAP_NER_PROVIDER: str = "spacy"
     MINDMAP_NER_MODEL: str = "xx_ent_wiki_sm"
     MINDMAP_MAX_VECTORS_PER_RUN: int = Field(default=10000, ge=1, le=500000)
     MINDMAP_MAX_LLM_CALLS_PER_RUN: int = Field(default=200, ge=0, le=10000)
     MINDMAP_MAX_TOKENS_PER_RUN: int = Field(default=200000, ge=1000, le=100000000)
+    MINDMAP_UMAP_N_NEIGHBORS: int = Field(default=15, ge=2, le=200)
+    MINDMAP_UMAP_N_COMPONENTS: int = Field(default=8, ge=2, le=128)
+    MINDMAP_UMAP_MIN_DIST: float = Field(default=0.0, ge=0.0, le=1.0)
+    MINDMAP_UMAP_RANDOM_STATE: int = 42
+    MINDMAP_HDBSCAN_MIN_CLUSTER_SIZE: int = Field(default=5, ge=2, le=10000)
+    MINDMAP_HDBSCAN_MIN_SAMPLES: int = Field(default=2, ge=1, le=10000)
+    MINDMAP_SMALL_N_THRESHOLD: int = Field(default=20, ge=2, le=100000)
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
