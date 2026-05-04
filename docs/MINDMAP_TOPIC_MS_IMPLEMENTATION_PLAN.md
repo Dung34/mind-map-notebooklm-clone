@@ -157,8 +157,120 @@ Sau khi merge code: cập nhật một trong hai (tránh lệch contract):
 
 ---
 
-## 10. Phiên bản tài liệu
+## 10. Phụ lục: Thêm **schema response** (OpenAI Chat Completions)
+
+Hiện tại [`topic_extractor.py`](../app/mindmap/topic_extractor.py) dùng:
+
+```python
+"response_format": {"type": "json_object"}
+```
+
+Chế độ này chỉ **đảm bảo JSON parse được**, không ràng buộc đủ key hay kiểu/enum. Để **ép model đúng contract** (đủ `title`, `summary`, `swot_category`, …), nên chuyển sang **Structured Outputs** với `json_schema`.
+
+Tham khảo chính thức: [Structured model outputs](https://developers.openai.com/docs/guides/structured-outputs) (Chat Completions). Model mặc định dự án (`gpt-4o-mini`) **hỗ trợ** `response_format.type = json_schema`.
+
+### 10.1 Hai lựa chọn
+
+| Cách | `response_format` | Khi nào dùng |
+|------|-------------------|----------------|
+| JSON mode | `{"type": "json_object"}` | Nhanh, ít phụ thuộc API; parser Python + retry + chuẩn hoá enum sau cùng. |
+| Structured Outputs | `{"type": "json_schema", "json_schema": {...}}` | Production: giảm lệch schema, ít retry vì format; vẫn nên giữ parser defensive. |
+
+Khuyến nghị cho §4.1: dùng **`json_schema` + `strict: true`** cho object gốc nếu không gặp lỗi compatibility; giữ hàm `_parse_topic_json` để strip fence và fallback.
+
+### 10.2 Chỗ sửa trong code
+
+Trong `_chat_once`, thay `response_format` bằng object có dạng:
+
+```python
+"response_format": {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "mindmap_cluster_topic",
+        "strict": True,
+        "schema": { ... }  # JSON Schema — xem 10.3
+    },
+}
+```
+
+Toàn bộ payload vẫn POST `https://api.openai.com/v1/chat/completions` như cũ; không đổi URL.
+
+### 10.3 Quy tắc `strict: true` (OpenAI)
+
+- Root và mọi object lồng nhau: nên có `"additionalProperties": false`.
+- Mọi property khai báo trong `properties` nên nằm trong `"required"` (với strict).
+- Dùng `"enum": [...]` cho `swot_category` và `funnel_stage` để model không trả giá trị tự do.
+
+Ví dụ schema (copy vào `schema` sau khi chỉnh wording cho đúng enum dự án):
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Short topic label, 3–7 words, EN or VI."
+    },
+    "summary": {
+      "type": "string",
+      "description": "One sentence, max ~30 words, what unifies the excerpts."
+    },
+    "swot_category": {
+      "type": "string",
+      "enum": [
+        "Strength",
+        "Weakness",
+        "Opportunity",
+        "Threat",
+        "Mixed",
+        "N_A"
+      ]
+    },
+    "funnel_stage": {
+      "type": "string",
+      "enum": [
+        "Awareness",
+        "Consideration",
+        "Decision",
+        "Retention",
+        "Unknown"
+      ]
+    },
+    "ms_notes": {
+      "type": "string",
+      "description": "One short M&S insight sentence; may be empty."
+    }
+  },
+  "required": [
+    "title",
+    "summary",
+    "swot_category",
+    "funnel_stage",
+    "ms_notes"
+  ]
+}
+```
+
+Trong Python có thể gán `TOPIC_JSON_SCHEMA` là `dict` trên module rồi nhúng vào payload (không cần stringify thêm — `httpx`/`json` serialize đúng).
+
+### 10.4 Prompt kết hợp schema
+
+Khi bật Structured Outputs, **vẫn** nên mô tả ngắn trong system prompt (ngôn ngữ, không emoji, góc M&S). Schema đã ép hình dạng; prompt giúp **chất lượng nội dung**, không thay thế validator.
+
+### 10.5 Refusal / an toàn
+
+Theo tài liệu OpenAI, một số lần gọi có thể trả refusal đặc biệt khi policy chặn. Code hiện chỉ đọc `choices[0].message.content`; nếu sau này gặp `refusal` hoặc empty content, cần nhánh xử lý riêng (retry hoặc fallback `N_A`).
+
+### 10.6 Fallback nếu API báo lỗi schema
+
+Nếu snapshot model hoặc endpoint không chấp nhận `json_schema` (lỗi 400): tạm **quay lại** `json_object` + prompt strict + parser như kế hoạch §4.1 gốc.
+
+---
+
+## 11. Phiên bản tài liệu
 
 | Phiên bản | Ngày | Ghi chú |
 |-----------|------|---------|
 | 1.0 | 2026-05-04 | Kế hoạch thực thi §4.1 — file độc lập |
+| 1.1 | 2026-05-04 | Thêm §10 Phụ lục schema response OpenAI |

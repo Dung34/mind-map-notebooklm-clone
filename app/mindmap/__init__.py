@@ -7,7 +7,13 @@ from app.mindmap.reducer import reduce_umap
 from app.mindmap.tree_cluster_artifacts import write_clusters_tree_raw_json
 from app.mindmap.representative import representative_chunk_ids
 from app.mindmap.topic_artifacts import write_topics_json
-from app.mindmap.topic_extractor import OpenAITopicExtractor, TopicExtractorError, TopicPayload
+from app.mindmap.topic_extractor import (
+    GroqTopicExtractor,
+    OpenAITopicExtractor,
+    TopicExtractorError,
+    TopicPayload,
+    mindmap_topic_extractor,
+)
 from app.mindmap.topics_stage import extract_topics_for_clusters_top
 from app.mindmap.ner import build_entities_payload
 from app.mindmap.entities_artifacts import write_entities_json
@@ -16,9 +22,11 @@ from app.mindmap.mindmap_artifacts import write_mindmap_json
 
 __all__ = [
     "ClusterTopResult",
+    "GroqTopicExtractor",
     "OpenAITopicExtractor",
     "TopicExtractorError",
     "TopicPayload",
+    "mindmap_topic_extractor",
     "build_entities_payload",
     "build_mindmap_payload",
     "build_clusters_tree_raw_payload",

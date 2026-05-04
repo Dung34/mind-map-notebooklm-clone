@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP_SENTENCES: int = Field(default=2, ge=0, le=10)
 
     OPENAI_API_KEY: Optional[str] = None
+    GROQ_API_KEY: Optional[str] = None
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     EMBEDDING_BATCH_SIZE: int = Field(default=32, ge=1, le=256)
     EMBEDDING_MAX_RETRIES: int = Field(default=4, ge=0, le=10)
@@ -47,6 +48,8 @@ class Settings(BaseSettings):
     EMBED_EST_COST_PER_1K_TOKENS_USD: float = Field(default=0.00002, ge=0.0, le=1.0)
 
     MINDMAP_LLM_MODEL: str = "gpt-4o-mini"
+    MINDMAP_TOPIC_PROVIDER: str = "openai"
+    MINDMAP_GROQ_MODEL: str = "llama-3.3-70b-versatile"
     MINDMAP_LLM_TEMPERATURE: float = Field(default=0.2, ge=0.0, le=2.0)
     MINDMAP_TOPIC_REPR_K: int = Field(default=5, ge=1, le=20)
     MINDMAP_TOPIC_TEXT_LIMIT: int = Field(default=600, ge=100, le=8000)

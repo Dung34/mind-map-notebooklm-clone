@@ -6,7 +6,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.mindmap.representative import representative_chunk_ids
-from app.mindmap.topic_extractor import OpenAITopicExtractor
+from app.mindmap.topic_extractor import GroqTopicExtractor, OpenAITopicExtractor, mindmap_topic_extractor
 from app.mindmap.vector_loader import LoadedVectors
 
 
@@ -47,14 +47,15 @@ def extract_topics_for_clusters_top(
     if not isinstance(clusters, list):
         raise ValueError("clusters_top.clusters must be a list")
 
-    extractor: OpenAITopicExtractor | None = None
+    extractor: GroqTopicExtractor | OpenAITopicExtractor | None = None
 
     topics: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "mindmap_run_id": mindmap_run_id,
     }
     llm_calls = 0
-    model = settings.MINDMAP_LLM_MODEL
+    topic_provider = settings.MINDMAP_TOPIC_PROVIDER.strip().lower()
+    llm_model = settings.MINDMAP_GROQ_MODEL if topic_provider == "groq" else settings.MINDMAP_LLM_MODEL
 
     for cl in clusters:
         if not isinstance(cl, dict):
@@ -73,8 +74,11 @@ def extract_topics_for_clusters_top(
                 "cluster_label": int(label),
                 "title": f"Cluster {label} (dry-run)",
                 "summary": "LLM skipped; use excerpts only.",
+                "swot_category": "N_A",
+                "funnel_stage": "Unknown",
+                "ms_notes": "",
                 "representative_chunk_ids": repr_ids,
-                "llm_meta": {"source": "dry_run", "model": model},
+                "llm_meta": {"source": "dry_run", "model": llm_model},
             }
             continue
 
@@ -84,7 +88,7 @@ def extract_topics_for_clusters_top(
             )
 
         if extractor is None:
-            extractor = OpenAITopicExtractor()
+            extractor = mindmap_topic_extractor()
 
         excerpts = _excerpts_for_repr(loaded, repr_ids, text_limit)
         topic = extractor.extract_topic(excerpts)
@@ -93,8 +97,11 @@ def extract_topics_for_clusters_top(
             "cluster_label": int(label),
             "title": topic.title,
             "summary": topic.summary,
+            "swot_category": topic.swot_category,
+            "funnel_stage": topic.funnel_stage,
+            "ms_notes": topic.ms_notes,
             "representative_chunk_ids": repr_ids,
-            "llm_meta": {"source": "openai", "model": model},
+            "llm_meta": {"source": topic_provider, "model": llm_model},
         }
 
     if noise_ids:
@@ -103,6 +110,9 @@ def extract_topics_for_clusters_top(
             "cluster_label": -1,
             "title": "Misc / Unclustered",
             "summary": "Chunks not assigned to a dense topic cluster.",
+            "swot_category": "N_A",
+            "funnel_stage": "Unknown",
+            "ms_notes": "",
             "representative_chunk_ids": repr_noise,
             "llm_meta": {"source": "deterministic"},
         }
