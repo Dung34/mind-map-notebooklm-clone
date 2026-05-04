@@ -74,11 +74,11 @@ Một **mindmap build** gắn với:
 
 Quy tắc chọn vectors:
 
-| Mode                   | Lấy gì từ pgvector                                                                |
-| ---------------------- | --------------------------------------------------------------------------------- |
-| `by_run_id`            | Tất cả `chunk_id` có `metadata->>'run_id' = :run_id` trong cùng `notebooklm_id`   |
-| `by_website` (default) | Tất cả `chunk_id` còn `is_active=true` theo `notebooklm_id` và host `website`      |
-| `by_chunk_ids`         | Tập `chunk_id` truyền vào, luôn filter theo `notebooklm_id`                        |
+| Mode                   | Lấy gì từ pgvector                                                              |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| `by_run_id`            | Tất cả `chunk_id` có `metadata->>'run_id' = :run_id` trong cùng `notebooklm_id` |
+| `by_website` (default) | Tất cả `chunk_id` còn `is_active=true` theo `notebooklm_id` và host `website`   |
+| `by_chunk_ids`         | Tập `chunk_id` truyền vào, luôn filter theo `notebooklm_id`                     |
 
 > Mặc định Phase 10 dùng `by_website` để mindmap luôn phản ánh state mới nhất của domain trong đúng notebook.
 
@@ -121,17 +121,17 @@ Quy ước:
 
 Tất cả ghi dưới `out/<slug>/mindmap/<mindmap_run_id>/`:
 
-| File                                    | Nội dung                                                              |
-| --------------------------------------- | --------------------------------------------------------------------- |
-| `vectors_snapshot.jsonl`                | `chunk_id`, `vector_checksum`, `source_url`, `text_preview` (debug)   |
-| `clusters_top.json`                     | Output HDBSCAN top-level: `{cluster_label: [chunk_ids]}` + noise list |
-| `clusters_tree_raw.json`                | Cây cluster sau recursive (chưa có topic name / synthesis)            |
-| `topics.json`                           | `{node_id: {title, summary, representative_chunk_ids, llm_meta}}`     |
-| `entities.json`                         | `{leaf_node_id: [Entity]}`                                            |
-| `mindmap.json`                          | Tree node schema 4.1 (artifact chính)                                 |
-| `mindmap.opml`                          | OPML 2.0 (render được)                                                |
-| `manifest.json`                         | `mindmap_run_id`, `pipeline_version`, params, stats                   |
-| `stats.json`                            | counts + duration mỗi stage                                           |
+| File                     | Nội dung                                                              |
+| ------------------------ | --------------------------------------------------------------------- |
+| `vectors_snapshot.jsonl` | `chunk_id`, `vector_checksum`, `source_url`, `text_preview` (debug)   |
+| `clusters_top.json`      | Output HDBSCAN top-level: `{cluster_label: [chunk_ids]}` + noise list |
+| `clusters_tree_raw.json` | Cây cluster sau recursive (chưa có topic name / synthesis)            |
+| `topics.json`            | `{node_id: {title, summary, representative_chunk_ids, llm_meta}}`     |
+| `entities.json`          | `{leaf_node_id: [Entity]}`                                            |
+| `mindmap.json`           | Tree node schema 4.1 (artifact chính)                                 |
+| `mindmap.opml`           | OPML 2.0 (render được)                                                |
+| `manifest.json`          | `mindmap_run_id`, `pipeline_version`, params, stats                   |
+| `stats.json`             | counts + duration mỗi stage                                           |
 
 ### 4.3 DB schema (Alembic migration mới)
 
@@ -183,25 +183,25 @@ Convert `pgvector.Vector` → `numpy.ndarray (N, 1536)`. Dùng trực tiếp `ch
 
 Vì `text-embedding-3-small` là 1536-dim, HDBSCAN trực tiếp sẽ kém ổn định. Bắt buộc reduce:
 
-| Param           | Default | Lý do                                               |
-| --------------- | ------- | --------------------------------------------------- |
-| `n_neighbors`   | 15      | Cân bằng local/global structure                     |
-| `n_components`  | 8       | Đủ phân biệt nhánh, tránh curse-of-dimensionality   |
-| `metric`        | cosine  | Khớp với metric semantic của OpenAI embedding       |
-| `min_dist`      | 0.0     | Cluster sát nhau hơn → HDBSCAN tách tốt             |
-| `random_state`  | 42      | Reproducible                                        |
+| Param          | Default | Lý do                                             |
+| -------------- | ------- | ------------------------------------------------- |
+| `n_neighbors`  | 15      | Cân bằng local/global structure                   |
+| `n_components` | 8       | Đủ phân biệt nhánh, tránh curse-of-dimensionality |
+| `metric`       | cosine  | Khớp với metric semantic của OpenAI embedding     |
+| `min_dist`     | 0.0     | Cluster sát nhau hơn → HDBSCAN tách tốt           |
+| `random_state` | 42      | Reproducible                                      |
 
 > Nếu `N < 20`: skip UMAP, chạy HDBSCAN trực tiếp trên cosine distance matrix.
 
 ### 5.3 HDBSCAN top-level
 
-| Param                     | Default | Ghi chú                                                       |
-| ------------------------- | ------- | ------------------------------------------------------------- |
-| `min_cluster_size`        | 5       | Cluster nhỏ hơn 5 chunk thì coi là noise                      |
-| `min_samples`             | 2       | Robustness vs noise                                           |
-| `metric`                  | euclidean (sau UMAP) | UMAP đã encode khoảng cách             |
-| `cluster_selection_method`| eom     | Excess of mass cho cluster ổn định                            |
-| `cluster_selection_epsilon`| 0.0    | Để mặc định, tinh chỉnh sau khi đo                            |
+| Param                       | Default              | Ghi chú                                  |
+| --------------------------- | -------------------- | ---------------------------------------- |
+| `min_cluster_size`          | 5                    | Cluster nhỏ hơn 5 chunk thì coi là noise |
+| `min_samples`               | 2                    | Robustness vs noise                      |
+| `metric`                    | euclidean (sau UMAP) | UMAP đã encode khoảng cách               |
+| `cluster_selection_method`  | eom                  | Excess of mass cho cluster ổn định       |
+| `cluster_selection_epsilon` | 0.0                  | Để mặc định, tinh chỉnh sau khi đo       |
 
 Output:
 
@@ -241,12 +241,12 @@ Provider mặc định: **OpenAI**, model `gpt-4o-mini` (cost-first). Có thể 
 
 Tham số:
 
-| Param                       | Default | Mô tả                                                |
-| --------------------------- | ------- | ---------------------------------------------------- |
-| `MINDMAP_LLM_MODEL`         | gpt-4o-mini | Model cho topic + synthesis                       |
-| `MINDMAP_LLM_TEMPERATURE`   | 0.2     | Tránh hallucinate, vẫn đa dạng tên                   |
-| `MINDMAP_TOPIC_REPR_K`      | 5       | Số chunk đại diện gửi cho LLM                        |
-| `MINDMAP_TOPIC_TEXT_LIMIT`  | 600     | Số ký tự tối đa mỗi excerpt                          |
+| Param                      | Default     | Mô tả                              |
+| -------------------------- | ----------- | ---------------------------------- |
+| `MINDMAP_LLM_MODEL`        | gpt-4o-mini | Model cho topic + synthesis        |
+| `MINDMAP_LLM_TEMPERATURE`  | 0.2         | Tránh hallucinate, vẫn đa dạng tên |
+| `MINDMAP_TOPIC_REPR_K`     | 5           | Số chunk đại diện gửi cho LLM      |
+| `MINDMAP_TOPIC_TEXT_LIMIT` | 600         | Số ký tự tối đa mỗi excerpt        |
 
 ### 5.6 Recursive sub-clustering
 
@@ -266,21 +266,21 @@ def build_subtree(cluster_chunks, depth):
 
 Defaults:
 
-| Param                          | Default | Ghi chú                                  |
-| ------------------------------ | ------- | ---------------------------------------- |
-| `MINDMAP_MAX_DEPTH`            | 3       | Đủ để render mindmap dễ đọc              |
-| `MINDMAP_MIN_RECURSE_SIZE`     | 12      | Cluster < 12 chunk → leaf                |
-| `MINDMAP_SUB_MIN_CLUSTER_SIZE` | 3       | HDBSCAN min_cluster_size cho sub-level   |
-| `MINDMAP_SUB_N_NEIGHBORS`      | 8       | UMAP n_neighbors cho sub-level           |
+| Param                          | Default | Ghi chú                                |
+| ------------------------------ | ------- | -------------------------------------- |
+| `MINDMAP_MAX_DEPTH`            | 3       | Đủ để render mindmap dễ đọc            |
+| `MINDMAP_MIN_RECURSE_SIZE`     | 12      | Cluster < 12 chunk → leaf              |
+| `MINDMAP_SUB_MIN_CLUSTER_SIZE` | 3       | HDBSCAN min_cluster_size cho sub-level |
+| `MINDMAP_SUB_N_NEIGHBORS`      | 8       | UMAP n_neighbors cho sub-level         |
 
 ### 5.7 NER for leaves
 
 Lựa chọn:
 
-| Provider          | Khi nào dùng                                              |
-| ----------------- | --------------------------------------------------------- |
-| `spacy`           | Default, offline, đa ngôn ngữ (`xx_ent_wiki_sm`)          |
-| `llm`             | Khi muốn entity chuẩn hơn cho domain (đắt hơn)            |
+| Provider | Khi nào dùng                                     |
+| -------- | ------------------------------------------------ |
+| `spacy`  | Default, offline, đa ngôn ngữ (`xx_ent_wiki_sm`) |
+| `llm`    | Khi muốn entity chuẩn hơn cho domain (đắt hơn)   |
 
 Pseudo-code spaCy:
 
@@ -296,13 +296,13 @@ def ner_for_leaf(leaf_chunks):
 
 Defaults:
 
-| Param                  | Default              |
-| ---------------------- | -------------------- |
-| `MINDMAP_NER_PROVIDER` | spacy                |
-| `MINDMAP_NER_MODEL`    | xx_ent_wiki_sm       |
-| `MINDMAP_NER_TOP_K`    | 8                    |
-| `MINDMAP_NER_MAX_CHUNKS` | 20                 |
-| `MINDMAP_NER_TEXT_LIMIT` | 8000               |
+| Param                    | Default        |
+| ------------------------ | -------------- |
+| `MINDMAP_NER_PROVIDER`   | spacy          |
+| `MINDMAP_NER_MODEL`      | xx_ent_wiki_sm |
+| `MINDMAP_NER_TOP_K`      | 8              |
+| `MINDMAP_NER_MAX_CHUNKS` | 20             |
+| `MINDMAP_NER_TEXT_LIMIT` | 8000           |
 
 > Nếu spaCy model chưa cài, service phải fail gracefully và chỉ ghi `entities=[]` cho leaf đó (không crash cả pipeline).
 
@@ -381,18 +381,19 @@ Body:
 
 ```jsonc
 {
-  "notebooklm_id": "nb_fpt_001",       // bắt buộc
-  "scope_mode": "by_website",         // by_website | by_run_id | by_chunk_ids
-  "website":   "fptsoftware.com",     // bắt buộc nếu scope_mode != by_chunk_ids
-  "run_id":    null,                  // bắt buộc nếu scope_mode == by_run_id
-  "chunk_ids": [],                    // bắt buộc nếu scope_mode == by_chunk_ids
-  "params":    {                      // override defaults (optional)
+  "notebooklm_id": "nb_fpt_001", // bắt buộc
+  "scope_mode": "by_website", // by_website | by_run_id | by_chunk_ids
+  "website": "fptsoftware.com", // bắt buộc nếu scope_mode != by_chunk_ids
+  "run_id": null, // bắt buộc nếu scope_mode == by_run_id
+  "chunk_ids": [], // bắt buộc nếu scope_mode == by_chunk_ids
+  "params": {
+    // override defaults (optional)
     "max_depth": 3,
     "min_cluster_size": 5,
     "skip_synthesis": false,
-    "skip_ner": false
+    "skip_ner": false,
   },
-  "dry_run": false
+  "dry_run": false,
 }
 ```
 
@@ -401,7 +402,7 @@ Response:
 ```jsonc
 {
   "mindmap_run_id": "20260428T123045Z_a1b2c3d4",
-  "status_url": "/mindmap/20260428T123045Z_a1b2c3d4"
+  "status_url": "/mindmap/20260428T123045Z_a1b2c3d4",
 }
 ```
 
@@ -437,12 +438,12 @@ Trả file `mindmap.opml` (`Content-Type: text/x-opml`).
 
 ## 8. Guardrails & cost
 
-| Guardrail                        | Default      | Lý do                              |
-| -------------------------------- | ------------ | ---------------------------------- |
-| `MINDMAP_MAX_VECTORS_PER_RUN`    | 10000        | Tránh build mindmap quá lớn        |
-| `MINDMAP_MAX_LLM_CALLS_PER_RUN`  | 200          | Topic + synthesis cộng dồn         |
-| `MINDMAP_MAX_TOKENS_PER_RUN`     | 200000       | Budget LLM cho 1 build             |
-| `MINDMAP_DRY_RUN_REQUIRED_GTE`   | 1000 vectors | Bắt buộc dry-run trước nếu vượt    |
+| Guardrail                       | Default      | Lý do                           |
+| ------------------------------- | ------------ | ------------------------------- |
+| `MINDMAP_MAX_VECTORS_PER_RUN`   | 10000        | Tránh build mindmap quá lớn     |
+| `MINDMAP_MAX_LLM_CALLS_PER_RUN` | 200          | Topic + synthesis cộng dồn      |
+| `MINDMAP_MAX_TOKENS_PER_RUN`    | 200000       | Budget LLM cho 1 build          |
+| `MINDMAP_DRY_RUN_REQUIRED_GTE`  | 1000 vectors | Bắt buộc dry-run trước nếu vượt |
 
 Cost summary trả về trong response giống Phase 9:
 
@@ -452,8 +453,8 @@ Cost summary trả về trong response giống Phase 9:
     "topic_calls": 14,
     "synthesis_calls": 18,
     "estimated_tokens": 42000,
-    "estimated_cost_usd": 0.0084
-  }
+    "estimated_cost_usd": 0.0084,
+  },
 }
 ```
 

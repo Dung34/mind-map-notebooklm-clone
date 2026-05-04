@@ -9,17 +9,25 @@ from app.mindmap.representative import representative_chunk_ids
 from app.mindmap.topic_artifacts import write_topics_json
 from app.mindmap.topic_extractor import OpenAITopicExtractor, TopicExtractorError, TopicPayload
 from app.mindmap.topics_stage import extract_topics_for_clusters_top
+from app.mindmap.ner import build_entities_payload
+from app.mindmap.entities_artifacts import write_entities_json
+from app.mindmap.tree_builder import build_mindmap_payload
+from app.mindmap.mindmap_artifacts import write_mindmap_json
 
 __all__ = [
     "ClusterTopResult",
     "OpenAITopicExtractor",
     "TopicExtractorError",
     "TopicPayload",
+    "build_entities_payload",
+    "build_mindmap_payload",
     "build_clusters_tree_raw_payload",
     "cluster_top",
     "extract_topics_for_clusters_top",
     "reduce_umap",
     "representative_chunk_ids",
+    "write_entities_json",
+    "write_mindmap_json",
     "write_clusters_top_json",
     "write_clusters_tree_raw_json",
     "write_topics_json",

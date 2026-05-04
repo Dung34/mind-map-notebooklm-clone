@@ -277,6 +277,48 @@ Trong `app/config.py` (và `.env`):
 - Giảm chiều UMAP, HDBSCAN, cây `clusters_tree_raw.json`.
 - NER spaCy (model tải về máy).
 
+### 5.7 Benchmark framework (để so provider crawl)
+
+Dùng cùng 1 tập URL, cùng timeout, cùng chunk config để benchmark công bằng.
+
+**Dataset benchmark khuyến nghị:**
+
+- Domain: `fptsoftware.com`
+- URL mẫu: 30 URL đầu tiên từ map
+- Chạy 3 vòng, lấy median
+- Giữ nguyên downstream (`cleaner -> chunker -> embedding`) để đo chất lượng thực dùng cho RAG
+
+**KPI nên đo:**
+
+| KPI | Công thức | Ý nghĩa |
+|-----|-----------|---------|
+| `crawl_success_rate` | `success_url_count / requested_url_count` | Độ ổn định crawl |
+| `cost_per_100_urls_usd` | `total_cost_usd * 100 / requested_url_count` | Dễ so theo quy mô |
+| `avg_latency_per_url_s` | `total_duration_s / success_url_count` | Tốc độ |
+| `avg_words_per_chunk` | `sum(word_count) / chunk_count` | Độ đậm nội dung |
+| `usable_chunk_ratio` | `vector_count / chunk_count` | Tỷ lệ chunk vào được pipeline embedding + mindmap |
+| `noise_ratio_top_cluster` | từ `clusters_top.metrics.noise_ratio` | Chất lượng semantic grouping |
+
+**Bảng benchmark (điền theo run thực tế):**
+
+| Provider | Mode | Requested URLs | Success URLs | Chunk count | Vector count | Usable chunk ratio | Noise ratio | Latency/url (s) | Cost/run (USD) | Cost/100 URLs (USD) | Ghi chú |
+|----------|------|----------------|--------------|-------------|--------------|--------------------|-------------|-----------------|----------------|----------------------|--------|
+| Firecrawl | current (`map + scrape`) | 30 | 30 (ví dụ) | 74 | 57 | 0.77 | 0.00 | TBD | TBD | TBD | Baseline hiện tại |
+| Jina Reader | simple | 30 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | URL->markdown nhanh, token thấp |
+| Jina Reader | detail | 30 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | Snippet dài hơn, token cao hơn |
+| Apify | crawler actor | 30 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | Mạnh anti-bot, setup phức tạp hơn |
+| ZenRows | scrape API | 30 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | Mạnh bypass, giá tùy render mode |
+
+**Baseline đã có từ artifact hiện tại (`fptsoftware-com`):**
+
+- `chunk_count = 74` (từ `out/fptsoftware-com/chunks.jsonl`)
+- `vector_count = 57` (từ `clusters_top.json`)
+- `cluster_count = 6`, `noise_ratio = 0.0` (từ `clusters_top.json`)
+- `usable_chunk_ratio = 57/74 = 0.77`
+
+> Khuyến nghị quyết định provider theo thứ tự ưu tiên:  
+> (1) `cost_per_100_urls_usd`, (2) `usable_chunk_ratio`, (3) `noise_ratio_top_cluster`, (4) `latency/url`.
+
 ---
 
 ## 6. Bảo mật

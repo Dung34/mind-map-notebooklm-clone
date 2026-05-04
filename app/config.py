@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     MINDMAP_SUB_N_NEIGHBORS: int = Field(default=8, ge=2, le=200)
     MINDMAP_NER_PROVIDER: str = "spacy"
     MINDMAP_NER_MODEL: str = "xx_ent_wiki_sm"
+    MINDMAP_NER_TOP_K: int = Field(default=8, ge=1, le=100)
+    MINDMAP_NER_MAX_CHUNKS: int = Field(default=20, ge=1, le=200)
+    MINDMAP_NER_TEXT_LIMIT: int = Field(default=8000, ge=200, le=200000)
     MINDMAP_MAX_VECTORS_PER_RUN: int = Field(default=10000, ge=1, le=500000)
     MINDMAP_MAX_LLM_CALLS_PER_RUN: int = Field(default=200, ge=0, le=10000)
     MINDMAP_MAX_TOKENS_PER_RUN: int = Field(default=200000, ge=1000, le=100000000)
