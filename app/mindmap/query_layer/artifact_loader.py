@@ -36,7 +36,15 @@ def load_stage3_artifacts(artifact_root: str | Path) -> dict[str, Any]:
     topics = _read_json(_require_artifact(root / "topics.json"))
     entities = _read_json(_require_artifact(root / "entities.json"))
     mindmap = _read_json(_require_artifact(root / "mindmap.json"))
-    return {"artifact_root": str(root), "topics": topics, "entities": entities, "mindmap": mindmap}
+    clusters_top_path = root / "clusters_top.json"
+    clusters_top = _read_json(clusters_top_path) if clusters_top_path.exists() else None
+    return {
+        "artifact_root": str(root),
+        "topics": topics,
+        "entities": entities,
+        "mindmap": mindmap,
+        "clusters_top": clusters_top,
+    }
 
 
 def build_candidates_from_artifacts(artifacts: dict[str, Any]) -> list[CandidateItem]:

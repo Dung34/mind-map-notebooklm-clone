@@ -87,7 +87,12 @@ def _with_network_retry(fn):
     )(fn)
 
 
-def _validate_tree_node(node: Any, *, allow_root: bool = False) -> dict[str, Any]:
+def _validate_tree_node(
+    node: Any,
+    *,
+    allow_root: bool = False,
+    parent_type: str | None = None,
+) -> dict[str, Any]:
     if not isinstance(node, dict):
         raise Stage4GenerationError("mindmap tree node must be an object")
     node_type = str(node.get("type") or "").strip()
@@ -96,17 +101,43 @@ def _validate_tree_node(node: Any, *, allow_root: bool = False) -> dict[str, Any
         raise Stage4GenerationError("mindmap tree node.children must be an array")
     if allow_root:
         allowed = {"root"}
+    elif parent_type == "root":
+        allowed = {"theme"}
+    elif parent_type == "theme":
+        allowed = {"insight"}
+    elif parent_type == "insight":
+        allowed = {"action"}
+    elif parent_type == "action":
+        allowed = set()
     else:
         allowed = {"theme", "insight", "action"}
     if node_type not in allowed:
         raise Stage4GenerationError(f"invalid node type {node_type!r}, allowed={sorted(allowed)}")
+
+    # Enforce hierarchy size constraints from prompt contract.
+    child_count = len(children)
+    if allow_root:
+        if child_count < 4 or child_count > 6:
+            raise Stage4GenerationError("root must have 4-6 theme children")
+    elif node_type == "theme":
+        if child_count < 2 or child_count > 4:
+            raise Stage4GenerationError("theme must have 2-4 insight children")
+    elif node_type == "insight":
+        if child_count < 1 or child_count > 3:
+            raise Stage4GenerationError("insight must have 1-3 action children")
+    elif node_type == "action":
+        if child_count != 0:
+            raise Stage4GenerationError("action must not have children")
+
     title = str(node.get("title") or "").strip() or _fallback_title(node_type, allow_root=allow_root)
     summary = str(node.get("summary") or "").strip() or _fallback_summary(node_type)
     return {
         "title": title,
         "summary": summary,
         "type": node_type,
-        "children": [_validate_tree_node(c) for c in children],
+        "children": [
+            _validate_tree_node(c, parent_type=node_type) for c in children
+        ],
     }
 
 
@@ -224,28 +255,36 @@ def _context_lines(
 
 
 def _system_prompt(framework_tag: str) -> str:
-    base = (
-        "You are a Strategy Analyst that builds executable mindmaps from retrieved evidence.\n"
-        "Return only valid JSON tree.\n"
-        "Rules:\n"
-        "- Root node type must be 'root'.\n"
-        "- Child nodes can be only: 'theme', 'insight', 'action'.\n"
-        "- Keep hierarchy evidence-grounded and decision-oriented.\n"
-        "- Prefer complete structure over overly short output.\n"
-        "- Each insight/action must be supported by context items.\n"
-        "- No markdown, no extra keys outside schema."
+    _ = framework_tag
+    return (
+        "You are a senior strategy synthesis engine.\n"
+        "Your task is to generate ONE evidence-grounded business mindmap JSON from multi-cluster analyses.\n\n"
+        "PRIMARY GOAL\n"
+        "- Build a strategic mindmap that reflects the provided analyses faithfully.\n"
+        "- Prioritize: fidelity to evidence, cross-cluster synthesis, and actionability.\n\n"
+        "NON-NEGOTIABLE RULES\n"
+        "1) Use ONLY information present in the input data.\n"
+        "2) Do NOT invent facts, numbers, client names, competitors, certifications, or market claims.\n"
+        "3) If evidence is weak/conflicting, explicitly write: 'Insufficient evidence from provided analyses.'\n"
+        "4) Avoid duplicate nodes; merge semantically overlapping points.\n"
+        "5) Keep hierarchy balanced and concise.\n\n"
+        "TREE REQUIREMENTS\n"
+        "- Root node type must be 'root' with 4-6 theme children.\n"
+        "- Theme nodes type='theme', each with 2-4 insight children.\n"
+        "- Insight nodes type='insight', each with 1-3 action children.\n"
+        "- Action nodes type='action' and children must be empty.\n\n"
+        "NODE WRITING RULES\n"
+        "- title: 3-8 words, specific business language.\n"
+        "- summary: exactly 1 sentence, <= 30 words.\n"
+        "- Action summaries should start with a verb.\n\n"
+        "COVERAGE CONSTRAINT\n"
+        "- Cover signals from SWOT, DeepDive, Compare, RootCause, ProsCons when available.\n"
+        "- Do not create one theme per framework; synthesize them into strategic themes.\n\n"
+        "OUTPUT FORMAT\n"
+        "- Return JSON only, no markdown, no extra commentary.\n"
+        "- Root type must be 'root'. Allowed node types: root/theme/insight/action.\n"
+        "- No extra keys outside schema."
     )
-    if framework_tag == "SWOT":
-        return (
-            base
-            + "\nSWOT mandatory structure:\n"
-            + "- Root must include exactly 4 theme nodes: Strengths, Weaknesses, Opportunities, Threats.\n"
-            + "- Each SWOT theme must contain at least 2 insight nodes.\n"
-            + "- Each insight node must contain at least 1 action node.\n"
-            + "- If evidence is limited for a SWOT theme, still keep the theme and write summary as "
-            + "'Insufficient evidence from retrieved context'."
-        )
-    return base
 
 
 def _user_prompt(retrieval_context: dict[str, Any]) -> str:
@@ -255,12 +294,101 @@ def _user_prompt(retrieval_context: dict[str, Any]) -> str:
     if not lines:
         raise Stage4GenerationError("selected_context is empty; cannot generate stage 4 tree")
     return (
-        f"User query: {query}\n"
-        f"Framework: {framework_tag}\n\n"
-        "Retrieved context (ranked):\n"
+        "Build a strategic mindmap from the provided context.\n\n"
+        f"Context query: {query}\n"
+        f"Context framework tag: {framework_tag}\n\n"
+        "Retrieved context candidates:\n"
         + "\n".join(lines)
-        + "\n\nBuild a strategy mindmap JSON tree following the schema."
+        + "\n\nInstructions:\n"
+        + "1) Synthesize across clusters and perspectives, avoid mechanical item-by-item restatement.\n"
+        + "2) Identify high-impact strategic themes that recur or materially influence decisions.\n"
+        + "3) Convert themes into concrete insights and executable actions.\n"
+        + "4) If a point is under-evidenced, write: 'Insufficient evidence from provided analyses.'\n"
+        + "5) Return only one JSON tree following the schema."
     )
+
+
+def _user_prompt_from_analyses(analyses_doc: dict[str, Any]) -> str:
+    clusters = analyses_doc.get("clusters") or {}
+    if not isinstance(clusters, dict) or not clusters:
+        raise Stage4GenerationError("framework analyses input has no clusters")
+    lines: list[str] = []
+    for cluster_id, payload in clusters.items():
+        if not isinstance(payload, dict):
+            continue
+        title = str(payload.get("cluster_title") or cluster_id).strip()
+        synth = payload.get("cross_framework_synthesis") or {}
+        if not isinstance(synth, dict):
+            synth = {}
+        priorities = synth.get("top_3_priorities") or []
+        if not isinstance(priorities, list):
+            priorities = []
+        biggest_risk = str(synth.get("biggest_risk") or "").strip()
+        next_action = str(synth.get("next_best_action") or "").strip()
+
+        lines.append(f"[Cluster] id={cluster_id}; title={title}")
+        for p in priorities[:3]:
+            lines.append(f"  - priority: {str(p).strip()}")
+        if biggest_risk:
+            lines.append(f"  - risk: {biggest_risk}")
+        if next_action:
+            lines.append(f"  - next_action: {next_action}")
+
+        fa = payload.get("framework_analyses") or {}
+        if isinstance(fa, dict):
+            for fw_name in ("SWOT", "DeepDive", "Compare", "RootCause", "ProsCons"):
+                fw = fa.get(fw_name) or {}
+                if isinstance(fw, dict):
+                    summary = str(fw.get("summary") or "").strip()
+                    if summary:
+                        lines.append(f"  - {fw_name}.summary: {summary}")
+    if not lines:
+        raise Stage4GenerationError("framework analyses input has no usable content")
+    return (
+        "Build a strategic mindmap from multi-cluster framework analyses.\n\n"
+        f"Cluster count: {len(clusters)}\n"
+        "Frameworks covered per cluster: SWOT, DeepDive, Compare, RootCause, ProsCons\n\n"
+        "Data:\n"
+        + "\n".join(lines)
+        + "\n\nInstructions:\n"
+        + "1) Synthesize across clusters and frameworks (not cluster-by-cluster restatement).\n"
+        + "2) Create 4-6 strategic themes, each with 2-4 insights and 1-3 actions per insight.\n"
+        + "3) Keep output evidence-grounded to provided analyses only.\n"
+        + "4) If evidence is weak, use: 'Insufficient evidence from provided analyses.'\n"
+        + "5) Return only one JSON tree following schema."
+    )
+
+
+def _generate_tree_with_repair(system: str, user_base: str, provider: str) -> dict[str, Any]:
+    last_err: Exception | None = None
+    tree: dict[str, Any] | None = None
+    for attempt in range(2):
+        user = user_base
+        if attempt > 0 and last_err is not None:
+            user = (
+                user_base
+                + "\n\nPrevious output failed strict validation:\n"
+                + f"- {last_err}\n"
+                + "Regenerate a COMPLETE tree that strictly satisfies:\n"
+                + "- root has 4-6 theme children\n"
+                + "- each theme has 2-4 insight children\n"
+                + "- each insight has 1-3 action children\n"
+                + "- each action has empty children array\n"
+                + "Return only valid JSON in required schema."
+            )
+        try:
+            if provider == "groq":
+                raw = _with_network_retry(lambda: _chat_groq(system, user))()
+            else:
+                raw = _with_network_retry(lambda: _chat_openai(system, user))()
+            tree = _parse_generation_json(raw)
+            break
+        except Stage4GenerationError as e:
+            last_err = e
+            continue
+    if tree is None:
+        raise Stage4GenerationError(f"failed strict generation after retry: {last_err}") from last_err
+    return tree
 
 
 def _chat_openai(system: str, user: str) -> str:
@@ -334,12 +462,8 @@ def generate_stage4_tree(retrieval_context: dict[str, Any]) -> dict[str, Any]:
     provider = settings.MINDMAP_TOPIC_PROVIDER.strip().lower()
     framework_tag = str(retrieval_context.get("framework_tag") or "SWOT").strip()
     system = _system_prompt(framework_tag)
-    user = _user_prompt(retrieval_context)
-    if provider == "groq":
-        raw = _with_network_retry(lambda: _chat_groq(system, user))()
-    else:
-        raw = _with_network_retry(lambda: _chat_openai(system, user))()
-    tree = _parse_generation_json(raw)
+    user_base = _user_prompt(retrieval_context)
+    tree = _generate_tree_with_repair(system, user_base, provider)
     return {
         "schema_version": 1,
         "flow_mode": "business_strategy",
@@ -352,6 +476,24 @@ def generate_stage4_tree(retrieval_context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def generate_stage4_tree_from_analyses(analyses_doc: dict[str, Any]) -> dict[str, Any]:
+    settings = get_settings()
+    provider = settings.MINDMAP_TOPIC_PROVIDER.strip().lower()
+    system = _system_prompt("SYNTHESIS")
+    user_base = _user_prompt_from_analyses(analyses_doc)
+    tree = _generate_tree_with_repair(system, user_base, provider)
+    return {
+        "schema_version": 1,
+        "flow_mode": "business_strategy",
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "provider": provider,
+        "model": settings.MINDMAP_GROQ_MODEL if provider == "groq" else settings.MINDMAP_LLM_MODEL,
+        "framework_tag": "SYNTHESIS",
+        "query": "overview synthesis from framework analyses",
+        "tree": tree,
+    }
+
+
 def generate_stage4_from_file(
     retrieval_context_path: str | Path,
     *,
@@ -360,6 +502,19 @@ def generate_stage4_from_file(
     in_path = Path(retrieval_context_path).resolve()
     retrieval_context = json.loads(in_path.read_text(encoding="utf-8"))
     generated = generate_stage4_tree(retrieval_context)
+    out_path = Path(output_path).resolve() if output_path else in_path.parent / "mindmap_generated.json"
+    out_path.write_text(json.dumps(generated, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out_path
+
+
+def generate_stage4_from_analyses_file(
+    analyses_path: str | Path,
+    *,
+    output_path: str | Path | None = None,
+) -> Path:
+    in_path = Path(analyses_path).resolve()
+    analyses_doc = json.loads(in_path.read_text(encoding="utf-8"))
+    generated = generate_stage4_tree_from_analyses(analyses_doc)
     out_path = Path(output_path).resolve() if output_path else in_path.parent / "mindmap_generated.json"
     out_path.write_text(json.dumps(generated, ensure_ascii=False, indent=2), encoding="utf-8")
     return out_path

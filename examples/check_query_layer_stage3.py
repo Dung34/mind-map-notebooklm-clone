@@ -22,9 +22,21 @@ def main() -> None:
         help="Folder containing topics.json, entities.json, mindmap.json",
     )
     parser.add_argument("--query", help="User query (optional, fallback default if omitted)")
+    parser.add_argument(
+        "--retrieval-mode",
+        choices=("query", "overview"),
+        default="query",
+        help="Retrieval mode: query (semantic+entity) or overview (cluster coverage)",
+    )
     parser.add_argument("--top-k-semantic", type=int, default=24)
     parser.add_argument("--top-k-entity", type=int, default=20)
     parser.add_argument("--top-k-final", type=int, default=12)
+    parser.add_argument(
+        "--overview-rep-ratio",
+        type=float,
+        default=0.7,
+        help="Representative ratio for overview mode (0..1)",
+    )
     parser.add_argument(
         "--output",
         help="Output file path (default: <artifact-root>/retrieval_context.json)",
@@ -34,9 +46,11 @@ def main() -> None:
     inp = QueryLayerInput(
         artifact_root=args.artifact_root,
         query=args.query,
+        retrieval_mode=args.retrieval_mode,
         top_k_semantic=args.top_k_semantic,
         top_k_entity=args.top_k_entity,
         top_k_final=args.top_k_final,
+        overview_rep_ratio=args.overview_rep_ratio,
     )
     result = run_query_layer(inp)
     payload = result.to_dict()

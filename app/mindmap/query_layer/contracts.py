@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 FrameworkTag = Literal["SWOT", "DeepDive", "Compare", "RootCause", "ProsCons"]
 CandidateSource = Literal["mindmap_node", "topic_entry"]
+RetrievalMode = Literal["query", "overview"]
 
 DEFAULT_STRATEGIC_QUERY = (
     "Assess the company's position in the industry ecosystem, including partners, suppliers, customers, and strategic dependencies"
@@ -18,9 +19,11 @@ DEFAULT_STRATEGIC_QUERY = (
 class QueryLayerInput:
     artifact_root: str
     query: str | None = None
+    retrieval_mode: RetrievalMode = "query"
     top_k_semantic: int = 24
     top_k_entity: int = 20
     top_k_final: int = 12
+    overview_rep_ratio: float = 0.7
 
     def normalized_query(self) -> str:
         q = (self.query or "").strip()

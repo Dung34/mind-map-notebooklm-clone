@@ -11,27 +11,44 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from app.mindmap.generation_stage4 import Stage4GenerationError, generate_stage4_from_file
+from app.mindmap.generation_stage4 import (
+    Stage4GenerationError,
+    generate_stage4_from_analyses_file,
+    generate_stage4_from_file,
+)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Stage 4 generation smoke check")
     parser.add_argument(
         "--retrieval-context",
-        required=True,
         help="Path to retrieval_context.json from query layer",
     )
     parser.add_argument(
+        "--framework-analyses",
+        help="Path to framework_analyses_overview.json for synthesis mode",
+    )
+    parser.add_argument(
         "--output",
-        help="Output file path (default: same dir as retrieval_context -> mindmap_generated.json)",
+        help="Output file path (default: same dir as input -> mindmap_generated.json)",
     )
     args = parser.parse_args()
+    if not args.retrieval_context and not args.framework_analyses:
+        parser.error("one of --retrieval-context or --framework-analyses is required")
+    if args.retrieval_context and args.framework_analyses:
+        parser.error("provide only one input: --retrieval-context OR --framework-analyses")
 
     try:
-        out_path = generate_stage4_from_file(
-            args.retrieval_context,
-            output_path=args.output,
-        )
+        if args.framework_analyses:
+            out_path = generate_stage4_from_analyses_file(
+                args.framework_analyses,
+                output_path=args.output,
+            )
+        else:
+            out_path = generate_stage4_from_file(
+                args.retrieval_context,
+                output_path=args.output,
+            )
         payload = json.loads(Path(out_path).read_text(encoding="utf-8"))
         tree = payload.get("tree") or {}
         child_count = len(tree.get("children") or []) if isinstance(tree, dict) else 0
