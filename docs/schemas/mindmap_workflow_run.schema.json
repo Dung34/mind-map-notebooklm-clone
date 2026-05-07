@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cleanerrawdata.local/schemas/mindmap_workflow_run.schema.json",
+  "title": "MindmapWorkflowRunRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["companyName", "seedUrl", "scope", "mindmap"],
+  "properties": {
+    "companyName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seedUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["notebooklm_id"],
+      "properties": {
+        "notebooklm_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxUrls": { "type": "integer", "minimum": 1, "maximum": 10000, "default": 50 },
+        "includeSubdomains": { "type": "boolean", "default": false }
+      }
+    },
+    "scrape": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "concurrency": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5 },
+        "waitMs": { "type": "integer", "minimum": 0, "maximum": 60000, "default": 1500 },
+        "onlyMainContent": { "type": "boolean", "default": true }
+      }
+    },
+    "chunking": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxWords": { "type": "integer", "minimum": 50, "maximum": 2000, "default": 400 },
+        "minWords": { "type": "integer", "minimum": 1, "maximum": 200, "default": 15 },
+        "overlapSentences": { "type": "integer", "minimum": 0, "maximum": 10, "default": 2 }
+      }
+    },
+    "embedding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": { "type": "string", "default": "text-embedding-3-small" },
+        "batchSize": { "type": "integer", "minimum": 1, "maximum": 256, "default": 32 }
+      }
+    },
+    "mindmap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retrievalMode", "topKFinal", "overviewRepRatio"],
+      "properties": {
+        "retrievalMode": {
+          "type": "string",
+          "enum": ["overview", "query"],
+          "default": "overview"
+        },
+        "topKFinal": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 12
+        },
+        "overviewRepRatio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.7
+        },
+        "runFrameworkAnalyses": {
+          "type": "boolean",
+          "default": true
+        },
+        "generateMindmap": {
+          "type": "boolean",
+          "default": true
+        },
+        "outputMarkdown": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
+
